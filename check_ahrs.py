@@ -3,14 +3,11 @@ import numpy
 import numpy as np
 from matplotlib import pyplot as plt
 from scipy.ndimage import uniform_filter1d
-from scipy.stats import logistic
-
-import ahrs_scripts
 import utils
 
 
 def main(
-    path_folder, ahrs_fct, path_laz_LF_ENU, path_calibration, ts_mag_to_imu,
+    path_folder, path_laz_LF_ENU, path_calibration, ts_mag_to_imu,
     duration_filter_mag_axis=0.01, duration_filter_mag_merged=0.05, duration_filter_gyr=0.05, n_filter_acc=2,
     duration_filter_quaternions_outputs=0.01, gain_acc=1 * 1e-2, gain_mag=1 * 1e-1, plot=True
 ):
@@ -36,105 +33,20 @@ def main(
         env_orion = 0
         std_orion = 0
         cloud = False
+
     (
         ts_gnss, gnss_x, gnss_y, gnss_z, gnss_lon, gnss_lat,
         ts_imu, ax, ay, az, vrx, vry, vrz,
         ts_mag, mxlf, mylf, mzlf, mxla, myla, mzla, mxra, myra, mzra, mxrf, myrf, mzrf
     ) = utils.load_parquet_data(path_folder, path_calibration)
 
-    if ts_mag_to_imu:  # TS MAG to IMU
-        (
-            mxlf_interp, mylf_interp, mzlf_interp,
-            mxla_interp, myla_interp, mzla_interp,
-            mxra_interp, myra_interp, mzra_interp,
-            mxrf_interp, myrf_interp, mzrf_interp,
-            ax_interp, ay_interp, az_interp,
-            vrx_interp, vry_interp, vrz_interp,
-            ts
-        ) = utils.interpolate_mag_on_imu(
-            ts_imu, ts_mag,
-            uniform_filter1d(mxlf, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
-            uniform_filter1d(mylf, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
-            uniform_filter1d(mzlf, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
-            uniform_filter1d(mxla, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
-            uniform_filter1d(myla, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
-            uniform_filter1d(mzla, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
-            uniform_filter1d(mxra, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
-            uniform_filter1d(myra, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
-            uniform_filter1d(mzra, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
-            uniform_filter1d(mxrf, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
-            uniform_filter1d(myrf, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
-            uniform_filter1d(mzrf, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
-            ax, ay, az, vrx, vry, vrz)
-    else:  # TS IMU to MAG
-        (
-            mxlf_interp, mylf_interp, mzlf_interp,
-            mxla_interp, myla_interp, mzla_interp,
-            mxra_interp, myra_interp, mzra_interp,
-            mxrf_interp, myrf_interp, mzrf_interp,
-            ax_interp, ay_interp, az_interp,
-            vrx_interp, vry_interp, vrz_interp,
-            ts
-        ) = utils.interpolate_imu_on_mag(
-            ts_imu, ts_mag,
-            uniform_filter1d(mxlf, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
-            uniform_filter1d(mylf, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
-            uniform_filter1d(mzlf, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
-            uniform_filter1d(mxla, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
-            uniform_filter1d(myla, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
-            uniform_filter1d(mzla, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
-            uniform_filter1d(mxra, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
-            uniform_filter1d(myra, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
-            uniform_filter1d(mzra, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
-            uniform_filter1d(mxrf, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
-            uniform_filter1d(myrf, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
-            uniform_filter1d(mzrf, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
-            ax, ay, az, vrx, vry, vrz)
-
-    mag_vect_raw = utils.get_mag_vect(gnss_lon, gnss_lat, gnss_z, path_calibration)
-
-    mx_interp, my_interp, mz_interp = utils.merge_mag(
-        mxlf_interp, mylf_interp, mzlf_interp,
-        mxla_interp, myla_interp, mzla_interp,
-        mxra_interp, myra_interp, mzra_interp,
-        mxrf_interp, myrf_interp, mzrf_interp)
-
-    acc_raw = numpy.column_stack((ax_interp, ay_interp, az_interp))
-    mag_raw = numpy.array([mx_interp, my_interp, mz_interp]).T
-
-    mag_vect_norm = numpy.linalg.norm(mag_vect_raw)
-    mag_norm = numpy.linalg.norm(mag_raw, axis=1)
-    acc_norm = numpy.linalg.norm(acc_raw, axis=1)
-
-    mag_avg = numpy.median(mag_norm)
-    acc_avg = numpy.median(acc_norm)
-
-    mag_error = mag_norm - mag_avg
-    acc_error = acc_norm - acc_avg
-
-    mag_rel_error = mag_error / mag_avg
-    acc_rel_error = acc_error / acc_avg
-
-    mag_weight = logistic.cdf(numpy.sqrt(numpy.maximum(0.01, mag_rel_error)))
-    acc_weight = logistic.cdf(numpy.sqrt(numpy.maximum(0.01, acc_rel_error)))
-
-    mag_vect = mag_vect_raw / mag_vect_norm
-    acc = numpy.column_stack((ax_interp / acc_norm, ay_interp / acc_norm, az_interp / acc_norm))
-    gyr = numpy.column_stack((vrx_interp, vry_interp, vrz_interp))
-    mag = numpy.array([mx_interp / mag_norm, my_interp / mag_norm, mz_interp / mag_norm]).T
-
-    quaternions = ahrs_fct(
-        ts,
-        uniform_filter1d(mag, size=int(duration_filter_mag_merged / np.median(np.diff(ts))), axis=0, mode="reflect"),
-        uniform_filter1d(gyr, size=int(duration_filter_gyr / np.median(np.diff(ts))), axis=0, mode="reflect"),
-        uniform_filter1d(acc, size=n_filter_acc, axis=0, mode="reflect"),
-        mag_vect,
-        gain_acc=gain_acc,
-        gain_mag=gain_mag,
-        mag_weight=mag_weight,
-        acc_weight=acc_weight,
+    ts, quaternions, mx_interp, my_interp, mz_interp, ax_interp, ay_interp, az_interp, mag_vect_raw = utils.ahrs(
+        gnss_z, gnss_lon, gnss_lat,
+        ts_imu, ax, ay, az, vrx, vry, vrz,
+        ts_mag, mxlf, mylf, mzlf, mxla, myla, mzla, mxra, myra, mzra, mxrf, myrf, mzrf,
+        duration_filter_mag_axis, duration_filter_mag_merged, duration_filter_gyr, n_filter_acc,
+        duration_filter_quaternions_outputs, gain_acc, gain_mag, path_calibration
     )
-    quaternions = utils.low_pass_quaternion_filter(quaternions, int(duration_filter_quaternions_outputs/np.median(np.diff(ts))))
 
     mx_ned, my_ned, mz_ned = utils.rotate_mag(mx_interp, my_interp, mz_interp, quaternions)
 
@@ -181,8 +93,8 @@ def main(
 
     print(f"{sum_mag_error = } nT")
 
-    print(f"ENV {ahrs_fct}: {round(env_upgrade, 1)}")
-    print(f"SUM STD {ahrs_fct}: {round(std_upgrade, 1)}")
+    print(f"ENV: {round(env_upgrade, 1)}")
+    print(f"SUM STD: {round(std_upgrade, 1)}")
     print(f"ENV Ref: {round(env_orion, 1)}")
     print(f'SUM STD Ref: {round(std_orion, 1)}')
 
@@ -236,12 +148,12 @@ def main(
                 color="orange",
                 linestyle="--")
 
-        axs[0].plot(ts - ts[0], env_x, label=f"Bx env {ahrs_fct} {round(numpy.mean(env_x), 1)} nT", color="blue", linestyle="--")
-        axs[1].plot(ts - ts[0], env_y, label=f"By env {ahrs_fct} {round(numpy.mean(env_y), 1)} nT", color="blue", linestyle="--")
-        axs[2].plot(ts - ts[0], env_z, label=f"Bz env {ahrs_fct} {round(numpy.mean(env_z), 1)} nT", color="blue", linestyle="--")
-        axs[0].plot(ts - ts[0], mx_ned - numpy.mean(mx_ned), label=f"Bx {ahrs_fct} [{round(numpy.max(mx_ned) - numpy.min(mx_ned), 1)}, {round(numpy.std(mx_ned), 1)}]", color="green")
-        axs[1].plot(ts - ts[0], my_ned - numpy.mean(my_ned), label=f"By {ahrs_fct} [{round(numpy.max(my_ned) - numpy.min(my_ned), 1)}, {round(numpy.std(my_ned), 1)}]", color="green")
-        axs[2].plot(ts - ts[0], mz_ned - numpy.mean(mz_ned), label=f"Bz {ahrs_fct} [{round(numpy.max(mz_ned) - numpy.min(mz_ned), 1)}, {round(numpy.std(mz_ned), 1)}]", color="green")
+        axs[0].plot(ts - ts[0], env_x, label=f"Bx env {round(numpy.mean(env_x), 1)} nT", color="blue", linestyle="--")
+        axs[1].plot(ts - ts[0], env_y, label=f"By env {round(numpy.mean(env_y), 1)} nT", color="blue", linestyle="--")
+        axs[2].plot(ts - ts[0], env_z, label=f"Bz env {round(numpy.mean(env_z), 1)} nT", color="blue", linestyle="--")
+        axs[0].plot(ts - ts[0], mx_ned - numpy.mean(mx_ned), label=f"Bx [{round(numpy.max(mx_ned) - numpy.min(mx_ned), 1)}, {round(numpy.std(mx_ned), 1)}]", color="green")
+        axs[1].plot(ts - ts[0], my_ned - numpy.mean(my_ned), label=f"By [{round(numpy.max(my_ned) - numpy.min(my_ned), 1)}, {round(numpy.std(my_ned), 1)}]", color="green")
+        axs[2].plot(ts - ts[0], mz_ned - numpy.mean(mz_ned), label=f"Bz [{round(numpy.max(mz_ned) - numpy.min(mz_ned), 1)}, {round(numpy.std(mz_ned), 1)}]", color="green")
 
         axs[0].legend()
         axs[1].legend()
@@ -333,7 +245,6 @@ if __name__ == "__main__":
         "gain_mag": 2 * 1e-1,
     }
     args = {
-        "ahrs_fct": ahrs_scripts.ahrs_madgwick_python_benet,
         "ts_mag_to_imu": True,
     }
 

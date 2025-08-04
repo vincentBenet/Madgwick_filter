@@ -1,8 +1,6 @@
 import datetime
 import math
 import os
-
-import matplotlib.pyplot as plt
 import numpy
 import numpy as np
 import pandas as pd
@@ -10,8 +8,8 @@ import pyIGRF
 import pyproj
 import scipy
 from scipy.ndimage import maximum_filter1d, minimum_filter1d, uniform_filter1d
-
 from scipy.spatial.transform import Rotation
+from scipy.stats import logistic
 
 
 def load_parquet_data(path_folder, path_calibration=None):
@@ -687,3 +685,162 @@ def quaternion_distance(q1, q2):
     dot_product = np.abs(np.dot(q1, q2))
     dot_product = np.clip(dot_product, -1.0, 1.0)
     return 2 * np.arccos(dot_product)
+
+
+def ahrs(
+        gnss_z, gnss_lon, gnss_lat,
+        ts_imu, ax, ay, az, vrx, vry, vrz,
+        ts_mag, mxlf, mylf, mzlf, mxla, myla, mzla, mxra, myra, mzra, mxrf, myrf, mzrf,
+        duration_filter_mag_axis, duration_filter_mag_merged, duration_filter_gyr, n_filter_acc,
+        duration_filter_quaternions_outputs, gain_acc, gain_mag, path_calibration
+):
+    (
+        mxlf_interp, mylf_interp, mzlf_interp,
+        mxla_interp, myla_interp, mzla_interp,
+        mxra_interp, myra_interp, mzra_interp,
+        mxrf_interp, myrf_interp, mzrf_interp,
+        ax_interp, ay_interp, az_interp,
+        vrx_interp, vry_interp, vrz_interp,
+        ts
+    ) = interpolate_mag_on_imu(
+        ts_imu, ts_mag,
+        uniform_filter1d(mxlf, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
+        uniform_filter1d(mylf, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
+        uniform_filter1d(mzlf, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
+        uniform_filter1d(mxla, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
+        uniform_filter1d(myla, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
+        uniform_filter1d(mzla, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
+        uniform_filter1d(mxra, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
+        uniform_filter1d(myra, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
+        uniform_filter1d(mzra, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
+        uniform_filter1d(mxrf, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
+        uniform_filter1d(myrf, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
+        uniform_filter1d(mzrf, size=int(duration_filter_mag_axis / np.median(np.diff(ts_mag))), axis=0, mode="reflect"),
+        ax, ay, az, vrx, vry, vrz)
+
+    mag_vect_raw = get_mag_vect(gnss_lon, gnss_lat, gnss_z, path_calibration)
+
+    mx_interp, my_interp, mz_interp = merge_mag(
+        mxlf_interp, mylf_interp, mzlf_interp,
+        mxla_interp, myla_interp, mzla_interp,
+        mxra_interp, myra_interp, mzra_interp,
+        mxrf_interp, myrf_interp, mzrf_interp)
+
+    acc_raw = numpy.column_stack((ax_interp, ay_interp, az_interp))
+    mag_raw = numpy.array([mx_interp, my_interp, mz_interp]).T
+
+    mag_vect_norm = numpy.linalg.norm(mag_vect_raw)
+    mag_norm = numpy.linalg.norm(mag_raw, axis=1)
+    acc_norm = numpy.linalg.norm(acc_raw, axis=1)
+
+    mag_avg = numpy.median(mag_norm)
+    acc_avg = numpy.median(acc_norm)
+
+    mag_error = mag_norm - mag_avg
+    acc_error = acc_norm - acc_avg
+
+    mag_rel_error = mag_error / mag_avg
+    acc_rel_error = acc_error / acc_avg
+
+    mag_weight = logistic.cdf(numpy.sqrt(numpy.maximum(0.01, mag_rel_error)))
+    acc_weight = logistic.cdf(numpy.sqrt(numpy.maximum(0.01, acc_rel_error)))
+
+    mag_vect = mag_vect_raw / mag_vect_norm
+    acc = numpy.column_stack((ax_interp / acc_norm, ay_interp / acc_norm, az_interp / acc_norm))
+    gyr = numpy.column_stack((vrx_interp, vry_interp, vrz_interp))
+    mag = numpy.array([mx_interp / mag_norm, my_interp / mag_norm, mz_interp / mag_norm]).T
+
+    quaternions = ahrs_madgwick_python_benet(
+        ts,
+        uniform_filter1d(mag, size=int(duration_filter_mag_merged / np.median(np.diff(ts))), axis=0, mode="reflect"),
+        uniform_filter1d(gyr, size=int(duration_filter_gyr / np.median(np.diff(ts))), axis=0, mode="reflect"),
+        uniform_filter1d(acc, size=n_filter_acc, axis=0, mode="reflect"),
+        mag_vect,
+        gain_acc=gain_acc,
+        gain_mag=gain_mag,
+        mag_weight=mag_weight,
+        acc_weight=acc_weight,
+    )
+    quaternions = low_pass_quaternion_filter(quaternions, int(duration_filter_quaternions_outputs/np.median(np.diff(ts))))
+    return ts, quaternions, mx_interp, my_interp, mz_interp, ax_interp, ay_interp, az_interp, mag_vect_raw
+
+
+def ahrs_madgwick_python_benet(ts, mag, gyr, acc, mag_vect, gain_acc, gain_mag, acc_weight, mag_weight):
+    q0_sample = int(60 / np.median(np.diff(ts)))
+    q0_backward = madgwick(
+        timestamps=ts[-q0_sample:],
+        acc=acc[-q0_sample:],
+        gyr=gyr[-q0_sample:],
+        mag=mag[-q0_sample:],
+        earth_vector=mag_vect,
+        q0=None,
+        mag_weight=mag_weight,
+        acc_weight=acc_weight,
+        gain_acc=gain_acc,
+        gain_mag=gain_mag,
+        forward=True)[-1]
+    q0_forward = madgwick(
+        timestamps=ts, acc=acc, gyr=gyr, mag=mag, earth_vector=mag_vect,
+        q0=q0_backward,
+        gain_acc=gain_acc,
+        mag_weight=mag_weight,
+        acc_weight=acc_weight,
+        gain_mag=gain_mag,
+        forward=False)[0]
+    return madgwick(
+        timestamps=ts, acc=acc, gyr=gyr, mag=mag, earth_vector=mag_vect,
+        q0=q0_forward,
+        gain_acc=gain_acc,
+        mag_weight=mag_weight,
+        acc_weight=acc_weight,
+        gain_mag=gain_mag,
+        forward=True)
+
+
+def ahrs_madgwick_rust(ts, mag, gyr, acc, mag_vect, gain_acc, gain_mag):
+    import skipper_madgwick_filter_rs
+    config = skipper_madgwick_filter_rs.ConfigRs(
+        start=skipper_madgwick_filter_rs.StartingRs(
+            start_type="compute",
+            duration=60,
+            gains=skipper_madgwick_filter_rs.GainsRs(
+                acc=skipper_madgwick_filter_rs.GainTypeRs(
+                    gain_type="dynamic",
+                    value=-5*1e-4,
+                ),
+                mag=skipper_madgwick_filter_rs.GainTypeRs(
+                    gain_type="dynamic",
+                    value=-5*1e-4,
+                ),
+                gyr=skipper_madgwick_filter_rs.GainTypeRs(
+                    gain_type="constant",
+                    value=0.5,
+                ),
+            ),
+            quaternion=None,
+        ),
+        gains=skipper_madgwick_filter_rs.GainsRs(
+            acc=skipper_madgwick_filter_rs.GainTypeRs(
+                gain_type="constant",
+                value=-gain_acc,
+            ),
+            mag=skipper_madgwick_filter_rs.GainTypeRs(
+                gain_type="constant",
+                value=-gain_mag,
+            ),
+            gyr=skipper_madgwick_filter_rs.GainTypeRs(
+                gain_type="constant",
+                value=0.5,
+            ),
+        ),
+    )
+    rot_mat = skipper_madgwick_filter_rs.compute_rotations(
+        timestamps=np.ascontiguousarray(ts),
+        acc=np.ascontiguousarray(acc),
+        gyr=np.ascontiguousarray(gyr),
+        mag=np.ascontiguousarray(mag, dtype=np.float64),
+        earth_vector=mag_vect.tolist(),
+        config=config,
+    )
+    quaternions = utils.rot_mat_to_quaternions(rot_mat)
+    return quaternions
