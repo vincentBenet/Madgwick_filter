@@ -1,8 +1,7 @@
 import datetime
 import os
 import numpy
-import numpy as np
-import pandas as pd
+import pandas
 import pyIGRF
 import pyproj
 import scipy
@@ -20,7 +19,8 @@ def load_parquet_data(path_folder, path_calibration=None):
         os.path.join(path_folder, "right_arm.parquet"),
         os.path.join(path_folder, "right_forearm.parquet"),
     )
-    if path_calibration is not None:
+    if False:
+    # if path_calibration is not None:
         (
             ts_gnss_calib, gnss_x_calib, gnss_y_calib, gnss_z_calib, gnss_lon_calib, gnss_lat_calib,
             ts_imu_calib, ax_calib, ay_calib, az_calib, vrx_calib, vry_calib, vrz_calib,
@@ -59,58 +59,47 @@ def load_parquet_data(path_folder, path_calibration=None):
 
 
 def load_parquet_gnss(path_gnss):
-    gnss_data = pd.read_parquet(path_gnss, engine="pyarrow")
+    gnss_data = pandas.read_parquet(path_gnss, engine="pyarrow")
     lat = gnss_data["lat"].values
     lon = gnss_data["lon"].values
     alt = gnss_data["alt"].values
     gnss_ts = gnss_data["timestamps"].values
     transformer = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:2154", always_xy=True)
+    # TODO: Mettre un EPSG dynamique UTM
     x, y = transformer.transform(lon, lat)
     return gnss_ts, x, y, alt, lon, lat
 
 
 def load_parquet_imu(path_imu):
-    imu_data = pd.read_parquet(path_imu, engine="pyarrow")
+    imu_data = pandas.read_parquet(path_imu, engine="pyarrow")
     imu_ts = imu_data["timestamps"].values
     acc_value = imu_data.iloc[:, 1:4].values
-    gyr_value = imu_data.iloc[:, 4:7].values * np.pi / 180
+    gyr_value = imu_data.iloc[:, 4:7].values * numpy.pi / 180
     ax, ay, az = acc_value[:, 0], acc_value[:, 1], acc_value[:, 2]
     vrx, vry, vrz = gyr_value[:, 0], gyr_value[:, 1], gyr_value[:, 2]
     return imu_ts, ax, ay, az, vrx, vry, vrz
 
 
 def load_parquet_mag(path_left_forearm, path_left_arm, path_right_arm, path_right_forearm):
-    left_forearm_data = pd.read_parquet(path_left_forearm, engine="pyarrow")
-    left_arm_data = pd.read_parquet(path_left_arm, engine="pyarrow")
-    right_arm_data = pd.read_parquet(path_right_arm, engine="pyarrow")
-    right_forearm_data = pd.read_parquet(path_right_forearm, engine="pyarrow")
-    mag_left_side = np.c_[left_forearm_data.iloc[:, 1:].values, left_arm_data.iloc[:, 1:].values]
-    mag_right_side = np.c_[right_arm_data.iloc[:, 1:].values, right_forearm_data.iloc[:, 1:].values,]
+    left_forearm_data = pandas.read_parquet(path_left_forearm, engine="pyarrow")
+    left_arm_data = pandas.read_parquet(path_left_arm, engine="pyarrow")
+    right_arm_data = pandas.read_parquet(path_right_arm, engine="pyarrow")
+    right_forearm_data = pandas.read_parquet(path_right_forearm, engine="pyarrow")
+    mag_left_side = numpy.c_[left_forearm_data.iloc[:, 1:].values, left_arm_data.iloc[:, 1:].values]
+    mag_right_side = numpy.c_[right_arm_data.iloc[:, 1:].values, right_forearm_data.iloc[:, 1:].values,]
     ts_start = max(left_forearm_data.iloc[0, 0], right_forearm_data.iloc[0, 0])
     ts_end = min(left_forearm_data.iloc[-1, 0], right_forearm_data.iloc[-1, 0])
-    start_mag_ts_left = np.searchsorted(left_forearm_data.iloc[0], ts_start)
-    start_mag_ts_right = np.searchsorted(right_forearm_data.iloc[:, 0], ts_start)
-    end_mag_ts_right = np.searchsorted(right_forearm_data.iloc[:, 0], ts_end)
+    start_mag_ts_left = numpy.searchsorted(left_forearm_data.iloc[0], ts_start)
+    start_mag_ts_right = numpy.searchsorted(right_forearm_data.iloc[:, 0], ts_start)
+    end_mag_ts_right = numpy.searchsorted(right_forearm_data.iloc[:, 0], ts_end)
     mag_right_side = mag_right_side[start_mag_ts_right:end_mag_ts_right]
     ts_mag = right_forearm_data.iloc[start_mag_ts_right:end_mag_ts_right, 0].values
     mag_left_temp = mag_left_side[start_mag_ts_left:len(mag_right_side) + start_mag_ts_left]
     if len(mag_left_temp) < len(mag_right_side):
         mag_right_side = mag_right_side[:len(mag_left_temp)]
         ts_mag = ts_mag[:len(mag_left_temp)]
-    mag_data = np.c_[mag_left_side[start_mag_ts_left:len(mag_right_side) + start_mag_ts_left], mag_right_side]
-    mxlf = mag_data[:, 0]
-    mylf = mag_data[:, 1]
-    mzlf = mag_data[:, 2]
-    mxla = mag_data[:, 3]
-    myla = mag_data[:, 4]
-    mzla = mag_data[:, 5]
-    mxra = mag_data[:, 6]
-    myra = mag_data[:, 7]
-    mzra = mag_data[:, 8]
-    mxrf = mag_data[:, 9]
-    myrf = mag_data[:, 10]
-    mzrf = mag_data[:, 11]
-    return ts_mag, mxlf, mylf, mzlf, mxla, myla, mzla, mxra, myra, mzra, mxrf, myrf, mzrf
+    mag_data = numpy.c_[mag_left_side[start_mag_ts_left:len(mag_right_side) + start_mag_ts_left], mag_right_side]
+    return ts_mag, *mag_data.T
 
 
 def get_mag_vect(lon, lat, alt, path_calibration):
@@ -126,15 +115,16 @@ def get_mag_vect(lon, lat, alt, path_calibration):
     year_start = datetime.datetime(year, 1, 1)
     days_elapsed = (date - year_start).total_seconds() / (24 * 3600)
     decimal_year = year + (days_elapsed / days_in_year)
-    avg_lat = np.mean(lat)
-    avg_lon = np.mean(lon)
-    avg_alt = np.mean(alt)
-    mag_vect = pyIGRF.igrf_value(avg_lat, avg_lon, avg_alt, decimal_year)[-4:-1]
-    return mag_vect  # NED mag vect
+    return pyIGRF.igrf_value(
+        numpy.mean(lat),
+        numpy.mean(lon),
+        numpy.mean(alt),
+        decimal_year
+    )[-4:-1]  # NED mag vect
 
 
 def get_enveloppe(ts, mag_signal_1d, sliding_time=2):
-    freq = 1 / np.median(np.diff(ts, ))
+    freq = 1 / numpy.median(numpy.diff(ts, ))
     n = int(sliding_time * freq + 1)
     enveloppe_max = maximum_filter1d(mag_signal_1d, size=n, mode='reflect')
     enveloppe_min = minimum_filter1d(mag_signal_1d, size=n, mode='reflect')
@@ -147,7 +137,7 @@ def interpolate_mag_on_imu(
     ax, ay, az, vrx, vry, vrz,
     duration_filter_mag_axis
 ):
-    n_window = int(duration_filter_mag_axis / np.median(np.diff(ts_mag)))
+    n_window = int(duration_filter_mag_axis / numpy.median(numpy.diff(ts_mag)))
 
     mxlf_interp = scipy.interpolate.Akima1DInterpolator(ts_mag, low_pass(mxlf, ts=None, n=n_window, t=None))(ts_imu)
     mylf_interp = scipy.interpolate.Akima1DInterpolator(ts_mag, low_pass(mylf, ts=None, n=n_window, t=None))(ts_imu)
@@ -169,7 +159,7 @@ def interpolate_mag_on_imu(
         mxrf_interp, myrf_interp, mzrf_interp,
         ax, ay, az,
         vrx, vry, vrz, ts_imu])
-    return res[:, ~np.isnan(res).any(axis=0)]
+    return res[:, ~numpy.isnan(res).any(axis=0)]
 
 
 def interpolate_imu_on_mag(
@@ -209,7 +199,7 @@ def interpolate_imu_on_mag(
         vrx_interp, vry_interp, vrz_interp, ts_mag
     ])
 
-    return res[:, ~np.isnan(res).any(axis=0)]
+    return res[:, ~numpy.isnan(res).any(axis=0)]
 
 
 def merge_mag(mxlf, mylf, mzlf, mxla, myla, mzla, mxra, myra, mzra, mxrf, myrf, mzrf):
@@ -228,7 +218,7 @@ def madgwick(
 ):
 
     n = len(timestamps)
-    quaternions = np.zeros((n, 4))
+    quaternions = numpy.zeros((n, 4))
 
     if forward:
         start, end, step = 1, n, 1
@@ -244,7 +234,6 @@ def madgwick(
         coef = lambda _i: (_i + 1)**0.5 if q0 is None else 1
 
     quaternions[initial_index] = numpy.array([1, 0, 0, 0]) if q0 is None else q0
-
     for i in range(start, end, step):
         quaternions[i] = rotations.madgwick_step(
             prev_q(i), get_dt(i), coef(i),
@@ -272,12 +261,12 @@ def calibrate(
 def apply_calibration(calibration, mx, my, mz):
     p, b = calibration
     mag = numpy.array([mx, my, mz]).T - b
-    return np.dot(p, mag.T)
+    return numpy.dot(p, mag.T)
 
 
 def calcul_calibration(mx, my, mz, mag_ter):
     mag = numpy.array([mx, my, mz]).T
-    D = np.c_[
+    D = numpy.c_[
         mag ** 2,
         mag[:, :1] * mag[:, 1:2],
         mag[:, :1] * mag[:, 2:],
@@ -285,16 +274,16 @@ def calcul_calibration(mx, my, mz, mag_ter):
         mag[:, :1],
         mag[:, 1:2],
         mag[:, 2:]]
-    E = np.dot(D.T, D)
-    a = np.dot(np.dot(np.linalg.inv(E), D.T), np.ones(len(mag)))
-    n = np.array([[a[0], a[3] / 2, a[4] / 2], [a[3] / 2, a[1], a[5] / 2], [a[4] / 2, a[5] / 2, a[2]]])
-    v, u = np.linalg.eig(n)
-    v = np.diag(v)
-    Q = np.zeros(np.shape(u))
+    E = numpy.dot(D.T, D)
+    a = numpy.dot(numpy.dot(numpy.linalg.inv(E), D.T), numpy.ones(len(mag)))
+    n = numpy.array([[a[0], a[3] / 2, a[4] / 2], [a[3] / 2, a[1], a[5] / 2], [a[4] / 2, a[5] / 2, a[2]]])
+    v, u = numpy.linalg.eig(n)
+    v = numpy.diag(v)
+    Q = numpy.zeros(numpy.shape(u))
     for i in range(3):
-        Q[:, i] = u[:, i] / np.linalg.norm(u[:, i])
-    m = np.linalg.norm(mag_ter) * np.dot(np.dot(Q, np.sqrt(v)), Q.T)
-    b = np.dot(-0.5 * a[6:9], np.linalg.pinv(n))
+        Q[:, i] = u[:, i] / numpy.linalg.norm(u[:, i])
+    m = numpy.linalg.norm(mag_ter) * numpy.dot(numpy.dot(Q, numpy.sqrt(v)), Q.T)
+    b = numpy.dot(-0.5 * a[6:9], numpy.linalg.pinv(n))
     return m, b
 
 
@@ -318,7 +307,7 @@ def ahrs(
     ts_imu, ax, ay, az, vrx, vry, vrz,
     ts_mag, mxlf, mylf, mzlf, mxla, myla, mzla, mxra, myra, mzra, mxrf, myrf, mzrf,
     duration_filter_mag_axis, duration_filter_mag_merged, duration_filter_gyr, n_filter_acc,
-    duration_filter_quaternions_outputs, gain_acc, gain_mag, path_calibration, ts_mag_to_imu, ahrs_func,
+    duration_filter_quaternions_outputs, gain_acc, gain_mag, path_folder, ts_mag_to_imu, ahrs_func,
 ):
     if ts_mag_to_imu:
         (
@@ -353,7 +342,7 @@ def ahrs(
             mxrf, myrf, mzrf,
             ax, ay, az, vrx, vry, vrz, duration_filter_mag_axis)
 
-    mag_vect_raw = get_mag_vect(gnss_lon, gnss_lat, gnss_z, path_calibration)
+    mag_vect_raw = get_mag_vect(gnss_lon, gnss_lat, gnss_z, path_folder)
 
     mx_interp, my_interp, mz_interp = merge_mag(
         mxlf_interp, mylf_interp, mzlf_interp,
@@ -376,20 +365,20 @@ def ahrs(
         gain_acc=gain_acc,
         gain_mag=gain_mag,
     )
-    # quaternions = low_pass_quaternion_filter(quaternions, int(duration_filter_quaternions_outputs/np.median(np.diff(ts))))
+    quaternions = rotations.low_pass_quaternions(quaternions, ts, duration_filter_quaternions_outputs)
     return ts, quaternions, mx_interp, my_interp, mz_interp, ax_interp, ay_interp, az_interp, mag_vect_raw
 
 
 def low_pass(data, ts=None, n=None, t=None):
     if n is None:
-        n = int(t / np.median(np.diff(ts)))
+        n = int(t / numpy.median(numpy.diff(ts)))
     if n < 2:
         return data
     return uniform_filter1d(data, size=n, axis=0, mode="reflect")
 
 
 def ahrs_madgwick_python_benet(ts, mag, gyr, acc, mag_vect, gain_acc, gain_mag):
-    n_sample = int(60 / np.median(np.diff(ts)))
+    n_sample = int(60 / numpy.median(numpy.diff(ts)))
     q0_backward = madgwick(
         timestamps=ts[-n_sample:],
         acc=acc[-n_sample:],
@@ -452,10 +441,10 @@ def ahrs_madgwick_rust(ts, mag, gyr, acc, mag_vect, gain_acc, gain_mag):
         ),
     )
     rot_mat = skipper_madgwick_filter_rs.compute_rotations(
-        timestamps=np.ascontiguousarray(ts),
-        acc=np.ascontiguousarray(acc),
-        gyr=np.ascontiguousarray(gyr),
-        mag=np.ascontiguousarray(mag, dtype=np.float64),
+        timestamps=numpy.ascontiguousarray(ts),
+        acc=numpy.ascontiguousarray(acc),
+        gyr=numpy.ascontiguousarray(gyr),
+        mag=numpy.ascontiguousarray(mag, dtype=numpy.float64),
         earth_vector=mag_vect.tolist(),
         config=config,
     )

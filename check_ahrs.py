@@ -52,10 +52,14 @@ def main(
         ts_imu, ax, ay, az, vrx, vry, vrz,
         ts_mag, mxlf, mylf, mzlf, mxla, myla, mzla, mxra, myra, mzra, mxrf, myrf, mzrf,
         duration_filter_mag_axis, duration_filter_mag_merged, duration_filter_gyr, n_filter_acc,
-        duration_filter_quaternions_outputs, gain_acc, gain_mag, path_calibration, ts_mag_to_imu, ahrs_func,
+        duration_filter_quaternions_outputs, gain_acc, gain_mag, path_folder, ts_mag_to_imu, ahrs_func,
     )
 
     mx_ned, my_ned, mz_ned = rotations.rotate_data(mx_interp, my_interp, mz_interp, quaternions)
+
+    mx_enu, my_enu, mz_enu = my_ned - mag_vect_raw[1], mx_ned - mag_vect_raw[0], -mz_ned + mag_vect_raw[2]  # Résultat de Correction d'assiette sans mag terrestre
+
+    ts_filtered, sensors_positions = rotations.mag_position(ts_gnss, gnss_x, gnss_y, gnss_z, ts, quaternions)
 
     std_upgrade = numpy.std(mx_ned) + numpy.std(my_ned) + numpy.std(mz_ned)
 
@@ -76,7 +80,6 @@ def main(
     # plt.plot(ts, roll, label="roll")
     # plt.legend()
     # plt.show()
-
 
     env_upgrade = numpy.mean(env_x + env_y + env_z)
 
@@ -104,6 +107,8 @@ def main(
     error_mag_e = abs(avg_mag_e - mag_vect_raw[1])
     error_mag_d = abs(avg_mag_d - mag_vect_raw[2])
     sum_mag_error = error_mag_n + error_mag_e + error_mag_d
+
+
 
     print(f"{sum_mag_error = } nT")
 
@@ -162,9 +167,9 @@ def main(
         axs[0].plot(ts - ts[0], env_x, label=f"Bx env {round(numpy.mean(env_x), 1)} nT", color="blue", linestyle="--")
         axs[1].plot(ts - ts[0], env_y, label=f"By env {round(numpy.mean(env_y), 1)} nT", color="blue", linestyle="--")
         axs[2].plot(ts - ts[0], env_z, label=f"Bz env {round(numpy.mean(env_z), 1)} nT", color="blue", linestyle="--")
-        axs[0].plot(ts - ts[0], mx_ned - numpy.mean(mx_ned), label=f"Bx [{round(numpy.max(mx_ned) - numpy.min(mx_ned), 1)}, {round(numpy.std(mx_ned), 1)}]", color="green")
-        axs[1].plot(ts - ts[0], my_ned - numpy.mean(my_ned), label=f"By [{round(numpy.max(my_ned) - numpy.min(my_ned), 1)}, {round(numpy.std(my_ned), 1)}]", color="green")
-        axs[2].plot(ts - ts[0], mz_ned - numpy.mean(mz_ned), label=f"Bz [{round(numpy.max(mz_ned) - numpy.min(mz_ned), 1)}, {round(numpy.std(mz_ned), 1)}]", color="green")
+        axs[0].plot(ts - ts[0], mx_ned, label=f"Bx [{round(numpy.max(mx_ned) - numpy.min(mx_ned), 1)}, {round(numpy.std(mx_ned), 1)}]", color="green")
+        axs[1].plot(ts - ts[0], my_ned, label=f"By [{round(numpy.max(my_ned) - numpy.min(my_ned), 1)}, {round(numpy.std(my_ned), 1)}]", color="green")
+        axs[2].plot(ts - ts[0], mz_ned, label=f"Bz [{round(numpy.max(mz_ned) - numpy.min(mz_ned), 1)}, {round(numpy.std(mz_ned), 1)}]", color="green")
 
         axs[0].legend()
         axs[1].legend()
@@ -175,8 +180,6 @@ def main(
         fig.suptitle(
             f"{path_folder.split(os.sep)[-1].split("/")[-1]}\nSTD: {round(std_orion, 1)} - {round(std_upgrade, 1)} (-{round(100 * (1 - std_upgrade / std_orion), 1)}%)\nENV: {round(env_orion, 1)} - {round(env_upgrade, 1)} (-{round(100 * (1 - env_upgrade / env_orion), 1)}%)")
         plt.show()
-
-        rotations.mag_position(ts_gnss, gnss_x, gnss_y, gnss_z, ts, quaternions)
 
     return env_upgrade, env_orion, std_upgrade, std_orion
 
