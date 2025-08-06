@@ -220,13 +220,13 @@ def mag_position(ts_gnss, gnss_x, gnss_y, gnss_z, ts, quaternions, positions=np.
         coord_one_group = np.c_[coord_lambert_capteurs_echan[nn][0:13:3], coord_lambert_capteurs_echan[nn][1:13:3]]
         plt.plot(coord_one_group[:, 0], coord_one_group[:, 1], 'k-o')
 
-    plt.plot(x, y)
-    plt.plot(p1x, p1y)
-    plt.plot(p2x, p2y)
-    plt.plot(p3x, p3y)
-    plt.plot(p4x, p4y)
-    plt.axis("equal")
-    plt.show()
+    # plt.plot(x, y)
+    # plt.plot(p1x, p1y)
+    # plt.plot(p2x, p2y)
+    # plt.plot(p3x, p3y)
+    # plt.plot(p4x, p4y)
+    # plt.axis("equal")
+    # plt.show()
 
     return ts_filtered, sensors_positions
 
@@ -245,11 +245,7 @@ def madgwick_step(quaternion, dt, coef, mag, gyr, acc, gain_acc, gain_mag, step,
 def low_pass_quaternions(quaternions, ts, duration):
     smoothed = np.zeros_like(quaternions)
     smoothed[0] = quaternions[0]
-    dt = numpy.median(numpy.diff(ts))
-    smoothing_factor = dt / (duration + dt)
+    smoothing_factor = 1 - 1 / (duration / numpy.median(numpy.diff(ts)) + 1)
     for i in range(1, len(quaternions)):
-        q_prev = smoothed[i - 1]
-        q_curr = quaternions[i]
-        q_smooth = slerp_quaternion(numpy.array([q_prev]), numpy.array([q_curr]), 1 - smoothing_factor)
-        smoothed[i] = q_smooth
+        smoothed[i] = slerp_quaternion(numpy.array([smoothed[i - 1]]), numpy.array([quaternions[i]]), smoothing_factor)
     return smoothed

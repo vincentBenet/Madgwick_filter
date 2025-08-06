@@ -19,8 +19,8 @@ def load_parquet_data(path_folder, path_calibration=None):
         os.path.join(path_folder, "right_arm.parquet"),
         os.path.join(path_folder, "right_forearm.parquet"),
     )
-    if False:
-    # if path_calibration is not None:
+    # if False:
+    if path_calibration is not None:
         (
             ts_gnss_calib, gnss_x_calib, gnss_y_calib, gnss_z_calib, gnss_lon_calib, gnss_lat_calib,
             ts_imu_calib, ax_calib, ay_calib, az_calib, vrx_calib, vry_calib, vrz_calib,
