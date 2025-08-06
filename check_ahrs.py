@@ -2,21 +2,28 @@ import os
 import numpy
 import numpy as np
 from matplotlib import pyplot as plt
-from scipy.ndimage import uniform_filter1d
+
+import rotations
 import utils
 
 
 def main(
-    path_folder, path_laz_LF_ENU, path_calibration, ts_mag_to_imu,
-    duration_filter_mag_axis=0.01, duration_filter_mag_merged=0.05, duration_filter_gyr=0.05, n_filter_acc=2,
-    duration_filter_quaternions_outputs=0.01, gain_acc=1 * 1e-2, gain_mag=1 * 1e-1, plot=True
+    path_folder, path_laz_LF_ENU, path_calibration, ts_mag_to_imu, ahrs_func,
+    duration_filter_mag_axis, duration_filter_mag_merged, duration_filter_gyr, n_filter_acc,
+    duration_filter_quaternions_outputs, gain_acc, gain_mag, plot
 ):
-    try:  # Script to compare with Orion point cloud
+    try:  # Load Orion result point cloud (need python of QGIS 3.40 to execute)
+        assert path_laz_LF_ENU is not None
         from pyqgis_tools import point_cloud
         values_lf_enu = point_cloud.load_points(["bx_nT", "by_nT", "bz_nT", "GpsTime"], path=path_laz_LF_ENU)
         _, values_lf_enu["bx_nT"] = zip(*sorted(zip(values_lf_enu["GpsTime"], values_lf_enu["bx_nT"])))
         _, values_lf_enu["by_nT"] = zip(*sorted(zip(values_lf_enu["GpsTime"], values_lf_enu["by_nT"])))
         values_lf_enu["GpsTime"], values_lf_enu["bz_nT"] = zip(*sorted(zip(values_lf_enu["GpsTime"], values_lf_enu["bz_nT"])))
+
+        values_lf_enu["bx_nT"] = utils.low_pass(values_lf_enu["bx_nT"], ts=values_lf_enu["GpsTime"], t=duration_filter_mag_axis)
+        values_lf_enu["by_nT"] = utils.low_pass(values_lf_enu["by_nT"], ts=values_lf_enu["GpsTime"], t=duration_filter_mag_axis)
+        values_lf_enu["bz_nT"] = utils.low_pass(values_lf_enu["bz_nT"], ts=values_lf_enu["GpsTime"], t=duration_filter_mag_axis)
+
         std_orion = numpy.std(values_lf_enu["bx_nT"]) + numpy.std(values_lf_enu["by_nT"]) + numpy.std(
             values_lf_enu["bz_nT"])
         env_x_orion = utils.get_enveloppe(values_lf_enu["GpsTime"], values_lf_enu["bx_nT"])
@@ -27,14 +34,14 @@ def main(
     except Exception as e:
         print(e)
         values_lf_enu = None
-        env_x_orion = 0
-        env_y_orion = 0
-        env_z_orion = 0
+        env_x_orion = numpy.zeros(3)
+        env_y_orion = numpy.zeros(3)
+        env_z_orion = numpy.zeros(3)
         env_orion = 0
         std_orion = 0
         cloud = False
 
-    (
+    (  # Load RAW data
         ts_gnss, gnss_x, gnss_y, gnss_z, gnss_lon, gnss_lat,
         ts_imu, ax, ay, az, vrx, vry, vrz,
         ts_mag, mxlf, mylf, mzlf, mxla, myla, mzla, mxra, myra, mzra, mxrf, myrf, mzrf
@@ -45,10 +52,10 @@ def main(
         ts_imu, ax, ay, az, vrx, vry, vrz,
         ts_mag, mxlf, mylf, mzlf, mxla, myla, mzla, mxra, myra, mzra, mxrf, myrf, mzrf,
         duration_filter_mag_axis, duration_filter_mag_merged, duration_filter_gyr, n_filter_acc,
-        duration_filter_quaternions_outputs, gain_acc, gain_mag, path_calibration
+        duration_filter_quaternions_outputs, gain_acc, gain_mag, path_calibration, ts_mag_to_imu, ahrs_func,
     )
 
-    mx_ned, my_ned, mz_ned = utils.rotate_mag(mx_interp, my_interp, mz_interp, quaternions)
+    mx_ned, my_ned, mz_ned = rotations.rotate_data(mx_interp, my_interp, mz_interp, quaternions)
 
     std_upgrade = numpy.std(mx_ned) + numpy.std(my_ned) + numpy.std(mz_ned)
 
@@ -56,13 +63,20 @@ def main(
     env_y = utils.get_enveloppe(ts, my_ned)
     env_z = utils.get_enveloppe(ts, mz_ned)
 
-    ax_ned, ay_ned, az_ned = utils.rotate_mag(ax_interp, ay_interp, az_interp, quaternions)
+    ax_ned, ay_ned, az_ned = rotations.rotate_data(ax_interp, ay_interp, az_interp, quaternions)
 
-    yaw, pitch, roll = utils.quaternion_to_euler(quaternions)
-
+    yaw, pitch, roll = rotations.quaternion_to_euler(quaternions)
     duration_yaw_filter = 2
-    yaw_imu = uniform_filter1d(yaw, size=int(duration_yaw_filter / np.median(np.diff(ts))), axis=0, mode="reflect")
-    yaw_gnss = utils.gnss_to_yaw(gnss_x, gnss_y, ts_gnss, duration_yaw_filter)
+    yaw_gnss = rotations.gnss_to_yaw(gnss_x, gnss_y, ts_gnss, duration_yaw_filter)
+    yaw_imu = utils.low_pass(yaw, ts=ts, t=duration_yaw_filter)
+
+    # plt.scatter(ts_gnss[1:], yaw_gnss, label="yaw_gnss")
+    # plt.plot(ts, yaw_imu, label="yaw")
+    # plt.plot(ts, pitch, label="pitch")
+    # plt.plot(ts, roll, label="roll")
+    # plt.legend()
+    # plt.show()
+
 
     env_upgrade = numpy.mean(env_x + env_y + env_z)
 
@@ -93,10 +107,7 @@ def main(
 
     print(f"{sum_mag_error = } nT")
 
-    print(f"ENV: {round(env_upgrade, 1)}")
-    print(f"SUM STD: {round(std_upgrade, 1)}")
-    print(f"ENV Ref: {round(env_orion, 1)}")
-    print(f'SUM STD Ref: {round(std_orion, 1)}')
+    print(f"STD: {round(std_orion, 1)} - {round(std_upgrade, 1)} (-{round(100 * (1 - std_upgrade / std_orion), 1)}%)\nENV: {round(env_orion, 1)} - {round(env_upgrade, 1)} (-{round(100 * (1 - env_upgrade / env_orion), 1)}%)")
 
     if plot:
 
@@ -165,27 +176,29 @@ def main(
             f"{path_folder.split(os.sep)[-1].split("/")[-1]}\nSTD: {round(std_orion, 1)} - {round(std_upgrade, 1)} (-{round(100 * (1 - std_upgrade / std_orion), 1)}%)\nENV: {round(env_orion, 1)} - {round(env_upgrade, 1)} (-{round(100 * (1 - env_upgrade / env_orion), 1)}%)")
         plt.show()
 
+        rotations.mag_position(ts_gnss, gnss_x, gnss_y, gnss_z, ts, quaternions)
+
     return env_upgrade, env_orion, std_upgrade, std_orion
 
 
 if __name__ == "__main__":
-    plot = False
+    plot = True
     folder = r"C:\Users\VincentBenet\Documents\NAS_SKIPPERNDT\Share - SkipperNDT\SKPFR_TST_correctionAssiette_Courcouronnes"
     configs = {
-        "Susville-champ-2": {"calib": os.path.join(folder, "2025-07-30T12-10-49_4c62d0-367-Susville-calib"),
-                             "laz": os.path.join(folder, r"2025-07-30T11-58-47_4c62d0-366-Susville-champ-2\gis\point_cloud_mag_5fa74312_ENU.laz")},
-        "Susville-champ-1": {"calib": os.path.join(folder, "2025-07-30T12-10-49_4c62d0-367-Susville-calib"),
-                             "laz": os.path.join(folder, r"2025-07-29T15-11-24_4c62d0-365-Susville-champ-1\gis\point_cloud_mag_59080c1c_ENU.laz")},
-        "Courcourronnes-pente-marche": {"calib": os.path.join(folder, "2025-07-03T10-53-30_4c841c-586-backpack-calib"),
-                                        "laz": os.path.join(folder, r"2025-07-03T10-57-24_4c841c-587-backpack-pente-marche\gis\point_cloud_mag_141eb8c6_ENU.laz")},
-        "Courcourronnes-pente-course": {"calib": os.path.join(folder, "2025-07-03T10-53-30_4c841c-586-backpack-calib"),
-                                        "laz": os.path.join(folder, r"2025-07-03T11-13-39_4c841c-588-backpack-pente-course\gis\point_cloud_mag_a402d77c_ENU.laz")},
+        # "Susville-champ-2": {"calib": os.path.join(folder, "2025-07-30T12-10-49_4c62d0-367-Susville-calib"),
+        #                      "laz": os.path.join(folder, r"2025-07-30T11-58-47_4c62d0-366-Susville-champ-2\gis\point_cloud_mag_5fa74312_ENU.laz")},
+        # "Susville-champ-1": {"calib": os.path.join(folder, "2025-07-30T12-10-49_4c62d0-367-Susville-calib"),
+        #                      "laz": os.path.join(folder, r"2025-07-29T15-11-24_4c62d0-365-Susville-champ-1\gis\point_cloud_mag_59080c1c_ENU.laz")},
+        # "Courcourronnes-pente-marche": {"calib": os.path.join(folder, "2025-07-03T10-53-30_4c841c-586-backpack-calib"),
+        #                                 "laz": os.path.join(folder, r"2025-07-03T10-57-24_4c841c-587-backpack-pente-marche\gis\point_cloud_mag_141eb8c6_ENU.laz")},
+        # "Courcourronnes-pente-course": {"calib": os.path.join(folder, "2025-07-03T10-53-30_4c841c-586-backpack-calib"),
+        #                                 "laz": os.path.join(folder, r"2025-07-03T11-13-39_4c841c-588-backpack-pente-course\gis\point_cloud_mag_a402d77c_ENU.laz")},
         "Courcourronnes-plat-marche": {"calib": os.path.join(folder, "2025-07-03T10-53-30_4c841c-586-backpack-calib"),
                                        "laz": os.path.join(folder, r"2025-07-03T11-22-01_4c841c-589-backpack-plat-marche\gis\point_cloud_mag_6743ee20_ENU.laz")},
-        "Courcourronnes-plat-course": {"calib": os.path.join(folder, "2025-07-03T10-53-30_4c841c-586-backpack-calib"),
-                                       "laz": os.path.join(folder, r"2025-07-03T11-32-46_4c841c-590-backpack-plat-course\gis\point_cloud_mag_809cc083_ENU.laz")},
-        "vaulnavey-foret": {"calib": os.path.join(folder, "2025-08-01T09-30-20_4c62d0-369-vaulnavey-calib"),
-                                       "laz": os.path.join(folder, r"2025-08-01T09-30-20_4c62d0-369-vaulnavey-calib\gis\point_cloud_mag_1fbd1b88_ENU.laz")},
+        # "Courcourronnes-plat-course": {"calib": os.path.join(folder, "2025-07-03T10-53-30_4c841c-586-backpack-calib"),
+        #                                "laz": os.path.join(folder, r"2025-07-03T11-32-46_4c841c-590-backpack-plat-course\gis\point_cloud_mag_809cc083_ENU.laz")},
+        # "vaulnavey-foret": {"calib": os.path.join(folder, "2025-08-01T09-30-20_4c62d0-369-vaulnavey-calib"),
+        #                                "laz": os.path.join(folder, r"2025-08-01T09-30-20_4c62d0-369-vaulnavey-calib\gis\point_cloud_mag_1fbd1b88_ENU.laz")},
         # "vaulnavey-calib": {"calib": os.path.join(folder, "2025-08-01T09-30-20_4c62d0-369-vaulnavey-calib"),
         #                                "laz": os.path.join(folder, r"2025-08-01T09-08-18_4c62d0-368-vaulnavey-foret\gis\point_cloud_mag_8a93dd05_ENU.laz")},
         # "Susville-calib": {"calib": os.path.join(folder, "2025-07-30T12-10-49_4c62d0-367-Susville-calib"),
@@ -246,6 +259,7 @@ if __name__ == "__main__":
     }
     args = {
         "ts_mag_to_imu": True,
+        "ahrs_func": utils.ahrs_madgwick_python_benet,
     }
 
     for key, config in configs.items():
