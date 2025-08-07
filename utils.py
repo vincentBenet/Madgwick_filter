@@ -5,6 +5,7 @@ import pandas
 import pyIGRF
 import pyproj
 import scipy
+from matplotlib import pyplot as plt
 from scipy.ndimage import maximum_filter1d, minimum_filter1d, uniform_filter1d
 
 import rotations
@@ -38,13 +39,13 @@ def load_parquet_data(path_folder, path_calibration=None):
         )
 
         print(
-            f"Calib LF: {numpy.std(numpy.linalg.norm(apply_calibration(lf_calib, mxlf_calib, mylf_calib, mzlf_calib), axis=0))}")
+            f"Calib LF: {round(numpy.std(numpy.linalg.norm(apply_calibration(lf_calib, mxlf_calib, mylf_calib, mzlf_calib), axis=0)), 1)}nT")
         print(
-            f"Calib LA: {numpy.std(numpy.linalg.norm(apply_calibration(la_calib, mxla_calib, myla_calib, mzla_calib), axis=0))}")
+            f"Calib LA: {round(numpy.std(numpy.linalg.norm(apply_calibration(la_calib, mxla_calib, myla_calib, mzla_calib), axis=0)), 1)}nT")
         print(
-            f"Calib RA: {numpy.std(numpy.linalg.norm(apply_calibration(ra_calib, mxra_calib, myra_calib, mzra_calib), axis=0))}")
+            f"Calib RA: {round(numpy.std(numpy.linalg.norm(apply_calibration(ra_calib, mxra_calib, myra_calib, mzra_calib), axis=0)), 1)}nT")
         print(
-            f"Calib RF: {numpy.std(numpy.linalg.norm(apply_calibration(rf_calib, mxrf_calib, myrf_calib, mzrf_calib), axis=0))}")
+            f"Calib RF: {round(numpy.std(numpy.linalg.norm(apply_calibration(rf_calib, mxrf_calib, myrf_calib, mzrf_calib), axis=0)), 1)}nT")
 
         mxlf, mylf, mzlf = apply_calibration(lf_calib, mxlf, mylf, mzlf)
         mxla, myla, mzla = apply_calibration(la_calib, mxla, myla, mzla)
@@ -212,12 +213,12 @@ def merge_mag(mxlf, mylf, mzlf, mxla, myla, mzla, mxra, myra, mzra, mxrf, myrf, 
 
 def madgwick(
     timestamps, acc, gyr, mag,
-    gain_acc, gain_mag,
+    gain_acc, gain_mag, beta,
     earth_vector, q0=None,
     forward=True,
 ):
-
     n = len(timestamps)
+
     quaternions = numpy.zeros((n, 4))
 
     if forward:
@@ -238,7 +239,7 @@ def madgwick(
         quaternions[i] = rotations.madgwick_step(
             prev_q(i), get_dt(i), coef(i),
             mag[i], gyr[i], acc[i],
-            gain_acc, gain_mag, step, earth_vector)
+            gain_acc[i], gain_mag[i], step, earth_vector, beta[i])
     return quaternions
 
 
@@ -290,16 +291,17 @@ def calcul_calibration(mx, my, mz, mag_ter):
 def normalize(ax_interp, ay_interp, az_interp, vrx_interp, vry_interp, vrz_interp, mx_interp, my_interp, mz_interp, mag_vect_raw):
     acc_raw = numpy.column_stack((ax_interp, ay_interp, az_interp))
     mag_raw = numpy.array([mx_interp, my_interp, mz_interp]).T
+    gyr = numpy.column_stack((vrx_interp, vry_interp, vrz_interp))
 
     mag_vect_norm = numpy.linalg.norm(mag_vect_raw)
     mag_norm = numpy.linalg.norm(mag_raw, axis=1)
     acc_norm = numpy.linalg.norm(acc_raw, axis=1)
+    gyr_norm = numpy.linalg.norm(gyr, axis=1)
 
     mag_vect = mag_vect_raw / mag_vect_norm
     acc = numpy.column_stack((ax_interp / acc_norm, ay_interp / acc_norm, az_interp / acc_norm))
-    gyr = numpy.column_stack((vrx_interp, vry_interp, vrz_interp))
     mag = numpy.array([mx_interp / mag_norm, my_interp / mag_norm, mz_interp / mag_norm]).T
-    return mag, gyr, acc, mag_vect
+    return mag, gyr, acc, mag_vect, mag_norm, acc_norm, gyr_norm
 
 
 def ahrs(
@@ -308,6 +310,7 @@ def ahrs(
     ts_mag, mxlf, mylf, mzlf, mxla, myla, mzla, mxra, myra, mzra, mxrf, myrf, mzrf,
     duration_filter_mag_axis, duration_filter_mag_merged, duration_filter_gyr, n_filter_acc,
     duration_filter_quaternions_outputs, gain_acc, gain_mag, path_folder, ts_mag_to_imu, ahrs_func,
+    adaptative_beta, adaptative_gain_acc, adaptative_gain_mag, beta
 ):
     if ts_mag_to_imu:
         (
@@ -350,11 +353,17 @@ def ahrs(
         mxra_interp, myra_interp, mzra_interp,
         mxrf_interp, myrf_interp, mzrf_interp)
 
-    mag, gyr, acc, mag_vect = normalize(
+    mag, gyr, acc, mag_vect, mag_norm, acc_norm, gyr_norm = normalize(
         ax_interp, ay_interp, az_interp,
         vrx_interp, vry_interp, vrz_interp,
         mx_interp, my_interp, mz_interp,
         mag_vect_raw)
+
+    gains_acc, gains_mag, betas = adaptative_gains(
+        adaptative_beta, adaptative_gain_acc, adaptative_gain_mag,
+        gain_acc, gain_mag, beta,
+        mag_norm, acc_norm, gyr_norm
+    )
 
     quaternions = ahrs_func(
         ts,
@@ -362,11 +371,46 @@ def ahrs(
         low_pass(gyr, ts=ts, n=None, t=duration_filter_gyr),
         low_pass(acc, ts=None, n=n_filter_acc, t=None),
         mag_vect,
-        gain_acc=gain_acc,
-        gain_mag=gain_mag,
+        gain_acc=gains_acc,
+        gain_mag=gains_mag,
+        beta=betas,
     )
     quaternions = rotations.low_pass_quaternions(quaternions, ts, duration_filter_quaternions_outputs)
     return ts, quaternions, mx_interp, my_interp, mz_interp, ax_interp, ay_interp, az_interp, mag_vect_raw
+
+
+def adaptative_gains(
+    adaptative_beta, adaptative_gain_acc, adaptative_gain_mag,
+    gain_acc, gain_mag, beta,
+    mag_norm, acc_norm, gyr_norm
+):
+    avg_mag = numpy.median(mag_norm)
+    avg_acc = numpy.median(acc_norm)
+    avg_gyr = numpy.median(gyr_norm)
+    std_mag = numpy.std(mag_norm)
+    std_acc = numpy.std(acc_norm)
+    std_gyr = numpy.std(gyr_norm)
+    error_acc = numpy.abs(acc_norm - avg_acc) + 1e-5
+    error_mag = numpy.abs(mag_norm - avg_mag) + 1e-5
+    error_gyr = numpy.abs(gyr_norm - avg_gyr) + 1e-5
+    norm_div_std_mag = error_mag / std_mag
+    norm_div_std_acc = error_acc / std_acc
+    norm_div_std_gyr = error_gyr / std_gyr
+
+    gains_acc = numpy.minimum(numpy.minimum(1, acc_norm), (1 / norm_div_std_acc))**adaptative_gain_acc * gain_acc
+    gains_mag = numpy.minimum(1, (1 / norm_div_std_mag))**adaptative_gain_mag * gain_mag
+    betas = (1 / ((numpy.maximum(1, norm_div_std_mag) + numpy.maximum(1, norm_div_std_acc) + numpy.maximum(1, norm_div_std_gyr)) / 3))**adaptative_beta * beta
+
+    # plt.plot(acc_norm, label="acc_norm")
+    # plt.plot(error_acc, label="error_acc")
+    # plt.plot(norm_div_std_acc, label="norm_div_std_acc")
+    # plt.plot(gains_acc/gain_acc, label="gains_acc")
+    # plt.plot(gains_mag/gain_mag, label="gains_mag")
+    # plt.plot(betas/beta, label="betas")
+    # plt.legend()
+    # plt.show()
+
+    return gains_acc, gains_mag, betas
 
 
 def low_pass(data, ts=None, n=None, t=None):
@@ -377,7 +421,7 @@ def low_pass(data, ts=None, n=None, t=None):
     return uniform_filter1d(data, size=n, axis=0, mode="reflect")
 
 
-def ahrs_madgwick_python_benet(ts, mag, gyr, acc, mag_vect, gain_acc, gain_mag):
+def ahrs_madgwick_python_benet(ts, mag, gyr, acc, mag_vect, gain_acc, gain_mag, beta):
     n_sample = int(60 / numpy.median(numpy.diff(ts)))
     q0_backward = madgwick(
         timestamps=ts[-n_sample:],
@@ -388,18 +432,21 @@ def ahrs_madgwick_python_benet(ts, mag, gyr, acc, mag_vect, gain_acc, gain_mag):
         q0=None,
         gain_acc=gain_acc,
         gain_mag=gain_mag,
+        beta=beta,
         forward=True)[-1]
     q0_forward = madgwick(
         timestamps=ts, acc=acc, gyr=gyr, mag=mag, earth_vector=mag_vect,
         q0=q0_backward,
         gain_acc=gain_acc,
         gain_mag=gain_mag,
+        beta=beta,
         forward=False)[0]
     return madgwick(
         timestamps=ts, acc=acc, gyr=gyr, mag=mag, earth_vector=mag_vect,
         q0=q0_forward,
         gain_acc=gain_acc,
         gain_mag=gain_mag,
+        beta=beta,
         forward=True)
 
 
