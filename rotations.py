@@ -201,29 +201,7 @@ def mag_position(ts_gnss, gnss_x, gnss_y, gnss_z, ts, quaternions, positions=np.
         sensors_positions[j].append([
             x + offsets_x,
             y + offsets_y,
-            z + offsets_z
-        ])
-
-    # p1x, p1y, p1z = numpy.array(sensors_positions[0])[0]
-    # p2x, p2y, p2z = numpy.array(sensors_positions[1])[0]
-    # p3x, p3y, p3z = numpy.array(sensors_positions[2])[0]
-    # p4x, p4y, p4z = numpy.array(sensors_positions[3])[0]
-    # coord_lambert_capteurs_echan = numpy.array([
-    #         p1x, p1y, p1z,
-    #         p2x, p2y, p2z,
-    #         p3x, p3y, p3z,
-    #         p4x, p4y, p4z]).T[::200]
-    #
-    # for nn in range(len(coord_lambert_capteurs_echan)):
-    #     coord_one_group = np.c_[coord_lambert_capteurs_echan[nn][0:13:3], coord_lambert_capteurs_echan[nn][1:13:3]]
-    #     plt.plot(coord_one_group[:, 0], coord_one_group[:, 1], 'k-o')
-    # plt.plot(x, y)
-    # plt.plot(p1x, p1y)
-    # plt.plot(p2x, p2y)
-    # plt.plot(p3x, p3y)
-    # plt.plot(p4x, p4y)
-    # plt.axis("equal")
-    # plt.show()
+            z + offsets_z])
 
     return ts_filtered, sensors_positions
 

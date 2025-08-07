@@ -144,9 +144,9 @@ def main(
         axs[0].plot(ts - ts[0], env_x, label=f"Bx env {round(numpy.mean(env_x), 1)} nT", color="blue", linestyle="--")
         axs[1].plot(ts - ts[0], env_y, label=f"By env {round(numpy.mean(env_y), 1)} nT", color="blue", linestyle="--")
         axs[2].plot(ts - ts[0], env_z, label=f"Bz env {round(numpy.mean(env_z), 1)} nT", color="blue", linestyle="--")
-        axs[0].plot(ts - ts[0], mx_enu, label=f"Bx [{round(numpy.max(mx_ned) - numpy.min(mx_ned), 1)}, {round(numpy.std(mx_ned), 1)}]", color="green")
-        axs[1].plot(ts - ts[0], my_enu, label=f"By [{round(numpy.max(my_ned) - numpy.min(my_ned), 1)}, {round(numpy.std(my_ned), 1)}]", color="green")
-        axs[2].plot(ts - ts[0], mz_enu, label=f"Bz [{round(numpy.max(mz_ned) - numpy.min(mz_ned), 1)}, {round(numpy.std(mz_ned), 1)}]", color="green")
+        axs[0].plot(ts - ts[0], mx_ned - numpy.median(mx_ned), label=f"Bx [{round(numpy.max(mx_ned) - numpy.min(mx_ned), 1)}, {round(numpy.std(mx_ned), 1)}]", color="green")
+        axs[1].plot(ts - ts[0], my_ned - numpy.median(my_ned), label=f"By [{round(numpy.max(my_ned) - numpy.min(my_ned), 1)}, {round(numpy.std(my_ned), 1)}]", color="green")
+        axs[2].plot(ts - ts[0], mz_ned - numpy.median(mz_ned), label=f"Bz [{round(numpy.max(mz_ned) - numpy.min(mz_ned), 1)}, {round(numpy.std(mz_ned), 1)}]", color="green")
 
         axs[3].plot(ts, ax_ned_lp, label="ax_ned_lp")
         axs[3].plot(ts, ay_ned_lp, label="ay_ned_lp")
@@ -167,6 +167,22 @@ def main(
         axs[4].grid(True)
         fig.suptitle(
             f"{path_folder.split(os.sep)[-1].split("/")[-1]}\nSTD: {round(std_orion, 1)} - {round(std_upgrade, 1)} (-{round(100 * (1 - std_upgrade / std_orion), 1)}%)\nENV: {round(env_orion, 1)} - {round(env_upgrade, 1)} (-{round(100 * (1 - env_upgrade / env_orion), 1)}%)")
+
+        fig2, ax2 = plt.subplots(1)
+        p1x, p1y, p1z = numpy.array(sensors_positions[0])[0]
+        p2x, p2y, p2z = numpy.array(sensors_positions[1])[0]
+        p3x, p3y, p3z = numpy.array(sensors_positions[2])[0]
+        p4x, p4y, p4z = numpy.array(sensors_positions[3])[0]
+        coord_lambert_capteurs_echan = numpy.array([p1x, p1y, p1z, p2x, p2y, p2z, p3x, p3y, p3z, p4x, p4y, p4z]).T[::200]
+        for nn in range(len(coord_lambert_capteurs_echan)):
+            coord_one_group = np.c_[coord_lambert_capteurs_echan[nn][0:13:3], coord_lambert_capteurs_echan[nn][1:13:3]]
+            plt.plot(coord_one_group[:, 0], coord_one_group[:, 1], 'k-o')
+        ax2.plot(p1x, p1y)
+        ax2.plot(p2x, p2y)
+        ax2.plot(p3x, p3y)
+        ax2.plot(p4x, p4y)
+        ax2.axis("equal")
+
         plt.show()
 
     return env_upgrade, env_orion, std_upgrade, std_orion
@@ -176,20 +192,20 @@ if __name__ == "__main__":
     plot = True
     folder = r"C:\Users\VincentBenet\Documents\NAS_SKIPPERNDT\Share - SkipperNDT\SKPFR_TST_correctionAssiette_Courcouronnes"
     configs = {
-        "Susville-champ-2": {"calib": os.path.join(folder, "2025-07-30T12-10-49_4c62d0-367-Susville-calib"),
-                             "laz": os.path.join(folder, r"2025-07-30T11-58-47_4c62d0-366-Susville-champ-2\gis\point_cloud_mag_5fa74312_ENU.laz")},
-        "Susville-champ-1": {"calib": os.path.join(folder, "2025-07-30T12-10-49_4c62d0-367-Susville-calib"),
-                             "laz": os.path.join(folder, r"2025-07-29T15-11-24_4c62d0-365-Susville-champ-1\gis\point_cloud_mag_59080c1c_ENU.laz")},
-        "Courcourronnes-pente-marche": {"calib": os.path.join(folder, "2025-07-03T10-53-30_4c841c-586-backpack-calib"),
-                                        "laz": os.path.join(folder, r"2025-07-03T10-57-24_4c841c-587-backpack-pente-marche\gis\point_cloud_mag_141eb8c6_ENU.laz")},
-        "Courcourronnes-pente-course": {"calib": os.path.join(folder, "2025-07-03T10-53-30_4c841c-586-backpack-calib"),
-                                        "laz": os.path.join(folder, r"2025-07-03T11-13-39_4c841c-588-backpack-pente-course\gis\point_cloud_mag_a402d77c_ENU.laz")},
-        "Courcourronnes-plat-marche": {"calib": os.path.join(folder, "2025-07-03T10-53-30_4c841c-586-backpack-calib"),
-                                       "laz": os.path.join(folder, r"2025-07-03T11-22-01_4c841c-589-backpack-plat-marche\gis\point_cloud_mag_6743ee20_ENU.laz")},
-        "Courcourronnes-plat-course": {"calib": os.path.join(folder, "2025-07-03T10-53-30_4c841c-586-backpack-calib"),
-                                       "laz": os.path.join(folder, r"2025-07-03T11-32-46_4c841c-590-backpack-plat-course\gis\point_cloud_mag_809cc083_ENU.laz")},
-        "vaulnavey-foret": {"calib": os.path.join(folder, "2025-08-01T09-30-20_4c62d0-369-vaulnavey-calib"),
-                                       "laz": os.path.join(folder, r"2025-08-01T09-30-20_4c62d0-369-vaulnavey-calib\gis\point_cloud_mag_1fbd1b88_ENU.laz")},
+        # "Susville-champ-2": {"calib": os.path.join(folder, "2025-07-30T12-10-49_4c62d0-367-Susville-calib"),
+        #                      "laz": os.path.join(folder, r"2025-07-30T11-58-47_4c62d0-366-Susville-champ-2\gis\point_cloud_mag_5fa74312_ENU.laz")},
+        # "Susville-champ-1": {"calib": os.path.join(folder, "2025-07-30T12-10-49_4c62d0-367-Susville-calib"),
+        #                      "laz": os.path.join(folder, r"2025-07-29T15-11-24_4c62d0-365-Susville-champ-1\gis\point_cloud_mag_59080c1c_ENU.laz")},
+        # "Courcourronnes-pente-marche": {"calib": os.path.join(folder, "2025-07-03T10-53-30_4c841c-586-backpack-calib"),
+        #                                 "laz": os.path.join(folder, r"2025-07-03T10-57-24_4c841c-587-backpack-pente-marche\gis\point_cloud_mag_141eb8c6_ENU.laz")},
+        # "Courcourronnes-pente-course": {"calib": os.path.join(folder, "2025-07-03T10-53-30_4c841c-586-backpack-calib"),
+        #                                 "laz": os.path.join(folder, r"2025-07-03T11-13-39_4c841c-588-backpack-pente-course\gis\point_cloud_mag_a402d77c_ENU.laz")},
+        # "Courcourronnes-plat-marche": {"calib": os.path.join(folder, "2025-07-03T10-53-30_4c841c-586-backpack-calib"),
+        #                                "laz": os.path.join(folder, r"2025-07-03T11-22-01_4c841c-589-backpack-plat-marche\gis\point_cloud_mag_6743ee20_ENU.laz")},
+        # "Courcourronnes-plat-course": {"calib": os.path.join(folder, "2025-07-03T10-53-30_4c841c-586-backpack-calib"),
+        #                                "laz": os.path.join(folder, r"2025-07-03T11-32-46_4c841c-590-backpack-plat-course\gis\point_cloud_mag_809cc083_ENU.laz")},
+        # "vaulnavey-foret": {"calib": os.path.join(folder, "2025-08-01T09-30-20_4c62d0-369-vaulnavey-calib"),
+        #                                "laz": os.path.join(folder, r"2025-08-01T09-30-20_4c62d0-369-vaulnavey-calib\gis\point_cloud_mag_1fbd1b88_ENU.laz")},
         # "vaulnavey-calib": {"calib": os.path.join(folder, "2025-08-01T09-30-20_4c62d0-369-vaulnavey-calib"),
         #                                "laz": os.path.join(folder, r"2025-08-01T09-08-18_4c62d0-368-vaulnavey-foret\gis\point_cloud_mag_8a93dd05_ENU.laz")},
         # "Susville-calib": {"calib": os.path.join(folder, "2025-07-30T12-10-49_4c62d0-367-Susville-calib"),
@@ -238,6 +254,10 @@ if __name__ == "__main__":
         #                        "laz": os.path.join(folder, r"2025-04-23T10-35-22_4c841c-558-Longnes-foret\gis\point_cloud_mag_7a2eefa4_ENU.laz")},
         # "Longnes-champ-pipe": {"calib": os.path.join(folder, "2024-12-18T15-23-32_4c841c-384-Longnes-calib"),
         #                        "laz": os.path.join(folder, r"2025-04-23T12-01-33_4c841c-560-Longnes-champ\gis\point_cloud_mag_849247dd_ENU.laz")},
+        "Susville-lacet": {"laz": os.path.join(folder, r"2025-08-07T14-26-27_4c62d0-372-Susville-lacet\gis\point_cloud_mag_83ff13ed_ENU.laz")},
+        "Susville-tanguage": {"laz": os.path.join(folder, r"2025-08-07T14-21-42_4c62d0-371-Susville-tanguage\gis\point_cloud_mag_165a38cf_ENU.laz")},
+        "Susville-roulis": {"laz": os.path.join(folder, r"2025-08-07T14-18-37_4c62d0-370-Susville-roulis\gis\point_cloud_mag_fa4cbcba_ENU.laz")},
+
     }
     params = {
         "duration_filter_mag_axis": 0.01,
@@ -261,7 +281,7 @@ if __name__ == "__main__":
         config["env_upgrade"], config["env_orion"], config["std_upgrade"], config["std_orion"] = main(
             plot=plot,
             path_folder=os.path.dirname(os.path.dirname(config["laz"])),
-            path_calibration=config["calib"],
+            path_calibration=config.get("calib"),
             path_laz_LF_ENU=config["laz"],
             **params,
             **args,
