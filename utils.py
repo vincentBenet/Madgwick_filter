@@ -5,15 +5,14 @@ import pandas
 import pyIGRF
 import pyproj
 import scipy
-from matplotlib import pyplot as plt
 from scipy.ndimage import maximum_filter1d, minimum_filter1d, uniform_filter1d
 
 import rotations
 
 
-def load_parquet_data(path_folder, path_calibration=None):
-    ts_gnss, gnss_x, gnss_y, gnss_z, gnss_lon, gnss_lat = load_parquet_gnss(os.path.join(path_folder, "gnss.parquet"))
-    ts_imu, ax, ay, az, vrx, vry, vrz = load_parquet_imu(os.path.join(path_folder, "imu.parquet"))
+def load_parquet_data(path_folder, path_calibration=None, path_imu=None):
+    ts_gnss, gnss_x, gnss_y, gnss_z, gnss_lon, gnss_lat = load_parquet_gnss(path_folder)
+    ts_imu, ax, ay, az, vrx, vry, vrz = load_parquet_imu(path_folder, path_imu)
     ts_mag, mxlf, mylf, mzlf, mxla, myla, mzla, mxra, myra, mzra, mxrf, myrf, mzrf = load_parquet_mag(
         os.path.join(path_folder, "left_forearm.parquet"),
         os.path.join(path_folder, "left_arm.parquet"),
@@ -60,24 +59,52 @@ def load_parquet_data(path_folder, path_calibration=None):
 
 
 def load_parquet_gnss(path_gnss):
-    gnss_data = pandas.read_parquet(path_gnss, engine="pyarrow")
+    gnss_data = pandas.read_parquet(os.path.join(path_gnss, "gnss.parquet"), engine="pyarrow")
     lat = gnss_data["lat"].values
     lon = gnss_data["lon"].values
     alt = gnss_data["alt"].values
     gnss_ts = gnss_data["timestamps"].values
-    transformer = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:2154", always_xy=True)
+    transformer = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:32631", always_xy=True)
     # TODO: Mettre un EPSG dynamique UTM
     x, y = transformer.transform(lon, lat)
     return gnss_ts, x, y, alt, lon, lat
 
 
-def load_parquet_imu(path_imu):
-    imu_data = pandas.read_parquet(path_imu, engine="pyarrow")
+def load_parquet_imu(path_imu, path_calib_imu=None):
+    imu_data = pandas.read_parquet(os.path.join(path_imu, "imu.parquet"), engine="pyarrow")
     imu_ts = imu_data["timestamps"].values
     acc_value = imu_data.iloc[:, 1:4].values
     gyr_value = imu_data.iloc[:, 4:7].values * numpy.pi / 180
     ax, ay, az = acc_value[:, 0], acc_value[:, 1], acc_value[:, 2]
     vrx, vry, vrz = gyr_value[:, 0], gyr_value[:, 1], gyr_value[:, 2]
+    if path_calib_imu is not None:
+        ts_imu_calib, ax_calib, ay_calib, az_calib, vrx_calib, vry_calib, vrz_calib = load_parquet_imu(path_calib_imu)
+        ax_lp = low_pass(ax_calib, ts_imu_calib, t=1)
+        ay_lp = low_pass(ay_calib, ts_imu_calib, t=1)
+        az_lp = low_pass(az_calib, ts_imu_calib, t=1)
+        jx = numpy.diff(ax_lp) / numpy.diff(ts_imu_calib)
+        jy = numpy.diff(ay_lp) / numpy.diff(ts_imu_calib)
+        jz = numpy.diff(az_lp) / numpy.diff(ts_imu_calib)
+        jn = numpy.linalg.norm([jx, jy, jz], axis=0)
+        mask = jn < numpy.percentile(jn, 10)
+        ax_filtered = ax_lp[1:][mask]
+        ay_filtered = ay_lp[1:][mask]
+        az_filtered = az_lp[1:][mask]
+        m, b = calcul_calibration(ax_filtered, ay_filtered, az_filtered, numpy.array([0, 0, 1]))
+        ax_calibrated, ay_calibrated, az_calibrated = apply_calibration(
+            (m, b), ax_filtered, ay_filtered, az_filtered)
+        norm_uncalibrated = numpy.linalg.norm([ax_filtered, ay_filtered, az_filtered], axis=0)
+        norm_calibrated = numpy.linalg.norm([ax_calibrated, ay_calibrated, az_calibrated], axis=0)
+
+        std_uncalibrated = numpy.std(norm_uncalibrated)
+        std_calibrated = numpy.std(norm_calibrated)
+
+        print(f"{std_uncalibrated = }")
+        print(f"{std_calibrated = }")
+
+        print(f"Calib IMU: Improvment x {round(std_uncalibrated / std_calibrated, 2)}")
+        ax, ay, az = apply_calibration((m, b), ax, ay, az)
+
     return imu_ts, ax, ay, az, vrx, vry, vrz
 
 
@@ -103,8 +130,18 @@ def load_parquet_mag(path_left_forearm, path_left_arm, path_right_arm, path_righ
     return ts_mag, *mag_data.T
 
 
-def get_mag_vect(lon, lat, alt, path_calibration):
-    split = path_calibration.split(os.sep)[-1]
+def get_mag_vect(lon, lat, alt, path_acquisition):
+    d, i, h, x, y, z, f = pyIGRF.igrf_value(
+        lat=numpy.mean(lat),
+        lon=numpy.mean(lon),
+        alt=numpy.mean(alt),
+        year=path_to_decimal_year(path_acquisition)
+    )
+    return x, y, z  # NED mag vect
+
+
+def path_to_decimal_year(path):
+    split = path.split(os.sep)[-1]
     split_2 = split.split("T")[0]
     year, month, day = split_2.split("-")
     year = int(year)
@@ -116,13 +153,7 @@ def get_mag_vect(lon, lat, alt, path_calibration):
     year_start = datetime.datetime(year, 1, 1)
     days_elapsed = (date - year_start).total_seconds() / (24 * 3600)
     decimal_year = year + (days_elapsed / days_in_year)
-    return pyIGRF.igrf_value(
-        numpy.mean(lat),
-        numpy.mean(lon),
-        numpy.mean(alt),
-        decimal_year
-    )[-4:-1]  # NED mag vect
-
+    return decimal_year
 
 def get_enveloppe(ts, mag_signal_1d, sliding_time=2):
     freq = 1 / numpy.median(numpy.diff(ts, ))
@@ -450,7 +481,7 @@ def ahrs_madgwick_python_benet(ts, mag, gyr, acc, mag_vect, gain_acc, gain_mag, 
         forward=True)
 
 
-def ahrs_madgwick_rust(ts, mag, gyr, acc, mag_vect, gain_acc, gain_mag):
+def ahrs_madgwick_rust(ts, mag, gyr, acc, mag_vect, gain_acc, gain_mag, beta):
     import skipper_madgwick_filter_rs
     config = skipper_madgwick_filter_rs.ConfigRs(
         start=skipper_madgwick_filter_rs.StartingRs(
@@ -475,11 +506,11 @@ def ahrs_madgwick_rust(ts, mag, gyr, acc, mag_vect, gain_acc, gain_mag):
         gains=skipper_madgwick_filter_rs.GainsRs(
             acc=skipper_madgwick_filter_rs.GainTypeRs(
                 gain_type="constant",
-                value=-gain_acc,
+                value=-numpy.max(gain_acc),
             ),
             mag=skipper_madgwick_filter_rs.GainTypeRs(
                 gain_type="constant",
-                value=-gain_mag,
+                value=-numpy.max(gain_mag),
             ),
             gyr=skipper_madgwick_filter_rs.GainTypeRs(
                 gain_type="constant",
