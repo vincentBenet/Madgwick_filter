@@ -1,11 +1,12 @@
 import os
 
 import numpy
-from qgis._core import QgsDoubleRange, QgsGeometry, QgsProviderRegistry
+from qgis._core import QgsDoubleRange, QgsGeometry, QgsProviderRegistry, QgsVectorFileWriter, QgsPoint
 from qgis.core import QgsPointCloudLayer
 
 try:  # From QGIS
     from ..pyqgis_tools import layer as layer_tools
+
 except ImportError:
     from pyqgis_tools import layer as layer_tools
     from . import load_env
@@ -102,3 +103,54 @@ def load_points(
 
 def get_attributes(path=None, layer=None, provider=None):
     return [key for key in load_points(path=path, layer=layer, provider=provider, n=1)]
+
+
+def create_point_cloud(path, values):
+    assert "X" in values
+    assert "Y" in values
+    assert "Z" in values
+
+    from qgis.core import (
+        QgsVectorLayer,
+        QgsField,
+        QgsFeature,
+        QgsGeometry
+    )
+    from PyQt5.QtCore import QVariant
+
+    # In-memory PointZ vector layer
+    vl = QgsVectorLayer("PointZ?crs=EPSG:4326", "pointcloud_points", "memory")
+    pr = vl.dataProvider()
+
+    # Add attributes
+    pr.addAttributes([
+        QgsField(attr, QVariant.Double) for attr in values.keys()
+        if attr not in ("X", "Y", "Z")
+    ])
+    vl.updateFields()
+
+    feats = []
+    for i in range(len(values["X"])):
+        f = QgsFeature()
+        pt = QgsPoint(values["X"][i], values["Y"][i], values["Z"][i])
+        f.setGeometry(QgsGeometry.fromPoint(pt))
+        attrs = [float(values[attr][i]) for attr in values if attr not in ("X", "Y", "Z")]
+        f.setAttributes(attrs)
+        feats.append(f)
+
+    pr.addFeatures(feats)
+    vl.updateExtents()
+
+    # Save as GPKG or Shapefile
+    writer = QgsVectorFileWriter.writeAsVectorFormat(
+        vl,
+        path,
+        "utf-8",
+        vl.crs(),
+        "GPKG" if path.endswith(".gpkg") else "ESRI Shapefile"
+    )
+
+    if writer[0] != QgsVectorFileWriter.NoError:
+        raise Exception(f"Error saving point cloud to {path}: {writer}")
+
+    return vl

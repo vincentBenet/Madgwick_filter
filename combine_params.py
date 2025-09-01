@@ -132,6 +132,7 @@ for combo in all_combos:
             path_laz_LF_ENU=cfg["laz"],
             gain_acc=check_ahrs.params["gain_acc"],
             gain_mag=check_ahrs.params["gain_mag"],
+            export="",
             **params_test
         )
         print(params_test)

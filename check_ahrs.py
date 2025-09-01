@@ -13,7 +13,7 @@ def main(
     path_folder, path_laz_LF_ENU, path_calibration, ts_mag_to_imu, ahrs_func,
     duration_filter_mag_axis, duration_filter_mag_merged, duration_filter_gyr, n_filter_acc,
     duration_filter_quaternions_outputs, gain_acc, gain_mag, plot, adaptative_beta, adaptative_gain_acc, adaptative_gain_mag, beta,
-    path_imu
+    path_imu, export
 ):
     try:  # Load Orion result point cloud (need python of QGIS 3.40 to execute)
         assert path_laz_LF_ENU is not None
@@ -51,7 +51,16 @@ def main(
     ) = utils.load_parquet_data(path_folder, path_calibration, path_imu)
 
     # Run quaternions calculation
-    ts, quaternions, mx_interp, my_interp, mz_interp, ax_interp, ay_interp, az_interp, mag_vect_raw = utils.ahrs(
+    (
+        ts, quaternions,
+        mx_interp, my_interp, mz_interp,
+        ax_interp, ay_interp, az_interp,
+        mag_vect_raw,
+        mxlf_interp, mylf_interp, mzlf_interp,
+        mxla_interp, myla_interp, mzla_interp,
+        mxra_interp, myra_interp, mzra_interp,
+        mxrf_interp, myrf_interp, mzrf_interp
+    ) = utils.ahrs(
         gnss_z, gnss_lon, gnss_lat,
         ts_imu, ax, ay, az, vrx, vry, vrz,
         ts_mag, mxlf, mylf, mzlf, mxla, myla, mzla, mxra, myra, mzra, mxrf, myrf, mzrf,
@@ -61,6 +70,12 @@ def main(
     )
 
     # Apply quaternions to mag data
+
+    mxlf_ned, mylf_ned, mzlf_ned = rotations.rotate_data(mxlf_interp, mylf_interp, mzlf_interp, quaternions)
+    mxla_ned, myla_ned, mzla_ned = rotations.rotate_data(mxla_interp, myla_interp, mzla_interp, quaternions)
+    mxra_ned, myra_ned, mzra_ned = rotations.rotate_data(mxra_interp, myra_interp, mzra_interp, quaternions)
+    mxrf_ned, myrf_ned, mzrf_ned = rotations.rotate_data(mxrf_interp, myrf_interp, mzrf_interp, quaternions)
+
     mx_ned, my_ned, mz_ned = rotations.rotate_data(mx_interp, my_interp, mz_interp, quaternions)
     # Remove earth magnetic field to mag data
     mx_enu, my_enu, mz_enu = my_ned - mag_vect_raw[1], mx_ned - mag_vect_raw[0], -mz_ned + mag_vect_raw[2]  # Résultat de Correction d'assiette sans mag terrestre
@@ -102,6 +117,16 @@ def main(
     yaw_gnss_interp = scipy.interpolate.Akima1DInterpolator(ts_gnss[1:], yaw_gnss)(ts)
     mask = ~numpy.isnan(yaw_gnss_interp)
     corr_yaw = pearsonr(yaw_gnss_interp[mask], yaw_imu[mask])[0]
+
+    if export:
+        utils.export_to_laz(
+            export,
+            yaw, pitch, roll,
+            mxlf_ned, mylf_ned, mzlf_ned,
+            mxla_ned, myla_ned, mzla_ned,
+            mxra_ned, myra_ned, mzra_ned,
+            mxrf_ned, myrf_ned, mzrf_ned,
+            ts_filtered, sensors_positions, ax_ned, ay_ned, az_ned)
 
     print(f"MAG error: {round(mag_error / numpy.linalg.norm(mag_vect_raw)*100, 2)}%")
     print(f"ACC error: {round(acc_error * 100, 2)}%")
@@ -206,26 +231,26 @@ def main(
 plot = False
 folder = r"C:\Users\VincentBenet\Documents\NAS_SKIPPERNDT\Share - SkipperNDT\SKPFR_TST_correctionAssiette_Courcouronnes"
 configs = {
-    "Susville-champ-2": {
-        "imu": os.path.join(folder, "2025-08-08T10-04-45_4c62d0-373-calib-imu"),
-        "calib": os.path.join(folder, "2025-07-30T12-10-49_4c62d0-367-Susville-calib"),
-         "laz": os.path.join(folder, r"2025-07-30T11-58-47_4c62d0-366-Susville-champ-2\gis\point_cloud_mag_5fa74312_ENU.laz")},
-    "Susville-champ-1": {
-        "imu": os.path.join(folder, "2025-08-08T10-04-45_4c62d0-373-calib-imu"),
-        "calib": os.path.join(folder, "2025-07-30T12-10-49_4c62d0-367-Susville-calib"),
-        "laz": os.path.join(folder, r"2025-07-29T15-11-24_4c62d0-365-Susville-champ-1\gis\point_cloud_mag_59080c1c_ENU.laz")},
-    "Courcourronnes-pente-marche": {"calib": os.path.join(folder, "2025-07-03T10-53-30_4c841c-586-backpack-calib"),
-                                    "laz": os.path.join(folder, r"2025-07-03T10-57-24_4c841c-587-backpack-pente-marche\gis\point_cloud_mag_141eb8c6_ENU.laz")},
+    # "Susville-champ-2": {
+    #     "imu": os.path.join(folder, "2025-08-08T10-04-45_4c62d0-373-calib-imu"),
+    #     "calib": os.path.join(folder, "2025-07-30T12-10-49_4c62d0-367-Susville-calib"),
+    #      "laz": os.path.join(folder, r"2025-07-30T11-58-47_4c62d0-366-Susville-champ-2\gis\point_cloud_mag_5fa74312_ENU.laz")},
+    # "Susville-champ-1": {
+    #     "imu": os.path.join(folder, "2025-08-08T10-04-45_4c62d0-373-calib-imu"),
+    #     "calib": os.path.join(folder, "2025-07-30T12-10-49_4c62d0-367-Susville-calib"),
+    #     "laz": os.path.join(folder, r"2025-07-29T15-11-24_4c62d0-365-Susville-champ-1\gis\point_cloud_mag_59080c1c_ENU.laz")},
+    # "Courcourronnes-pente-marche": {"calib": os.path.join(folder, "2025-07-03T10-53-30_4c841c-586-backpack-calib"),
+    #                                 "laz": os.path.join(folder, r"2025-07-03T10-57-24_4c841c-587-backpack-pente-marche\gis\point_cloud_mag_141eb8c6_ENU.laz")},
     "Courcourronnes-pente-course": {"calib": os.path.join(folder, "2025-07-03T10-53-30_4c841c-586-backpack-calib"),
                                     "laz": os.path.join(folder, r"2025-07-03T11-13-39_4c841c-588-backpack-pente-course\gis\point_cloud_mag_a402d77c_ENU.laz")},
-    "Courcourronnes-plat-marche": {"calib": os.path.join(folder, "2025-07-03T10-53-30_4c841c-586-backpack-calib"),
-                                   "laz": os.path.join(folder, r"2025-07-03T11-22-01_4c841c-589-backpack-plat-marche\gis\point_cloud_mag_6743ee20_ENU.laz")},
-    "Courcourronnes-plat-course": {"calib": os.path.join(folder, "2025-07-03T10-53-30_4c841c-586-backpack-calib"),
-                                   "laz": os.path.join(folder, r"2025-07-03T11-32-46_4c841c-590-backpack-plat-course\gis\point_cloud_mag_809cc083_ENU.laz")},
-    "vaulnavey-foret": {
-        "imu": os.path.join(folder, "2025-08-08T10-04-45_4c62d0-373-calib-imu"),
-        "calib": os.path.join(folder, "2025-08-01T09-30-20_4c62d0-369-vaulnavey-calib"),
-        "laz": os.path.join(folder, r"2025-08-01T09-08-18_4c62d0-368-vaulnavey-foret\gis\point_cloud_mag_8a93dd05_ENU.laz")},
+    # "Courcourronnes-plat-marche": {"calib": os.path.join(folder, "2025-07-03T10-53-30_4c841c-586-backpack-calib"),
+    #                                "laz": os.path.join(folder, r"2025-07-03T11-22-01_4c841c-589-backpack-plat-marche\gis\point_cloud_mag_6743ee20_ENU.laz")},
+    # "Courcourronnes-plat-course": {"calib": os.path.join(folder, "2025-07-03T10-53-30_4c841c-586-backpack-calib"),
+    #                                "laz": os.path.join(folder, r"2025-07-03T11-32-46_4c841c-590-backpack-plat-course\gis\point_cloud_mag_809cc083_ENU.laz")},
+    # "vaulnavey-foret": {
+    #     "imu": os.path.join(folder, "2025-08-08T10-04-45_4c62d0-373-calib-imu"),
+    #     "calib": os.path.join(folder, "2025-08-01T09-30-20_4c62d0-369-vaulnavey-calib"),
+    #     "laz": os.path.join(folder, r"2025-08-01T09-08-18_4c62d0-368-vaulnavey-foret\gis\point_cloud_mag_8a93dd05_ENU.laz")},
     # "vaulnavey-calib": {
     #     "imu": os.path.join(folder, "2025-08-08T10-04-45_4c62d0-373-calib-imu"),
     #     "calib": os.path.join(folder, "2025-08-01T09-30-20_4c62d0-369-vaulnavey-calib"),
@@ -278,34 +303,33 @@ configs = {
     #                        "laz": os.path.join(folder, r"2025-04-23T10-35-22_4c841c-558-Longnes-foret\gis\point_cloud_mag_7a2eefa4_ENU.laz")},
     # "Longnes-champ-pipe": {"calib": os.path.join(folder, "2024-12-18T15-23-32_4c841c-384-Longnes-calib"),
     #                        "laz": os.path.join(folder, r"2025-04-23T12-01-33_4c841c-560-Longnes-champ\gis\point_cloud_mag_849247dd_ENU.laz")},
-    "Susville-lacet": {
-        "imu": os.path.join(folder, "2025-08-08T10-04-45_4c62d0-373-calib-imu"),
-        "calib": os.path.join(folder, "2025-07-30T12-10-49_4c62d0-367-Susville-calib"),
-        "laz": os.path.join(folder, r"2025-08-07T14-26-27_4c62d0-372-Susville-lacet\gis\point_cloud_mag_83ff13ed_ENU.laz")},
-    "Susville-tanguage": {
-        "imu": os.path.join(folder, "2025-08-08T10-04-45_4c62d0-373-calib-imu"),
-        "calib": os.path.join(folder, "2025-07-30T12-10-49_4c62d0-367-Susville-calib"),
-        "laz": os.path.join(folder, r"2025-08-07T14-21-42_4c62d0-371-Susville-tanguage\gis\point_cloud_mag_165a38cf_ENU.laz")},
-    "Susville-roulis": {
-        "imu": os.path.join(folder, "2025-08-08T10-04-45_4c62d0-373-calib-imu"),
-        "calib": os.path.join(folder, "2025-07-30T12-10-49_4c62d0-367-Susville-calib"),
-        "laz": os.path.join(folder, r"2025-08-07T14-18-37_4c62d0-370-Susville-roulis\gis\point_cloud_mag_fa4cbcba_ENU.laz")},
-
+    # "Susville-lacet": {
+    #     "imu": os.path.join(folder, "2025-08-08T10-04-45_4c62d0-373-calib-imu"),
+    #     "calib": os.path.join(folder, "2025-07-30T12-10-49_4c62d0-367-Susville-calib"),
+    #     "laz": os.path.join(folder, r"2025-08-07T14-26-27_4c62d0-372-Susville-lacet\gis\point_cloud_mag_83ff13ed_ENU.laz")},
+    # "Susville-tanguage": {
+    #     "imu": os.path.join(folder, "2025-08-08T10-04-45_4c62d0-373-calib-imu"),
+    #     "calib": os.path.join(folder, "2025-07-30T12-10-49_4c62d0-367-Susville-calib"),
+    #     "laz": os.path.join(folder, r"2025-08-07T14-21-42_4c62d0-371-Susville-tanguage\gis\point_cloud_mag_165a38cf_ENU.laz")},
+    # "Susville-roulis": {
+    #     "imu": os.path.join(folder, "2025-08-08T10-04-45_4c62d0-373-calib-imu"),
+    #     "calib": os.path.join(folder, "2025-07-30T12-10-49_4c62d0-367-Susville-calib"),
+    #     "laz": os.path.join(folder, r"2025-08-07T14-18-37_4c62d0-370-Susville-roulis\gis\point_cloud_mag_fa4cbcba_ENU.laz")},
 }
 params = {
-    "gain_acc": 5 * 1e-2,
-    "gain_mag": 2.43 * 1e-1,
+    "gain_acc": 0.035784523071993,
+    "gain_mag": 0.188764085381157,
 
-    "duration_filter_mag_axis": 4 * 1e-2,
-    "duration_filter_mag_merged": 5 * 1e-2,
-    "duration_filter_gyr": 1 * 1e-5,
-    "n_filter_acc": 3,
-    "duration_filter_quaternions_outputs": 1 * 1e-2,
+    "duration_filter_mag_axis": 0.0452690316825228,
+    "duration_filter_mag_merged": 0.0512105564086326,
+    "duration_filter_gyr": 0.0000108141064983781,
+    "n_filter_acc": 4,
+    "duration_filter_quaternions_outputs": 0.00888122288358182,
 
-    "beta": 1 - 3.1 * 1e-2,
-    "adaptative_beta": 9 * 1e-2,
-    "adaptative_gain_acc": 2 * 1e-1,
-    "adaptative_gain_mag": 2.2 * 1e-1,
+    "beta": 1.0135715000825,
+    "adaptative_beta": 0.0697771656756145,
+    "adaptative_gain_acc": 0.245746344705917,
+    "adaptative_gain_mag": 0.244152324874861,
 }
 args = {
     "ts_mag_to_imu": True,
@@ -321,6 +345,7 @@ if __name__ == "__main__":
             path_calibration=config.get("calib"),
             path_imu=config.get("imu"),
             path_laz_LF_ENU=config["laz"],
+            export="test.laz",
             **params,
             **args,
         )

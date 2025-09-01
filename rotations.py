@@ -218,6 +218,8 @@ def madgwick_step(quaternion, dt, coef, mag, gyr, acc, gain_acc, gain_mag, step,
 
 
 def low_pass_quaternions(quaternions, ts, duration):
+    if duration == 0:
+        return quaternions
     smoothed = np.zeros_like(quaternions)
     smoothed[0] = quaternions[0]
     smoothing_factor = 1 - 1 / (duration / numpy.median(numpy.diff(ts)) + 1)

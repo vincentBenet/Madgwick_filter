@@ -155,6 +155,7 @@ def objective(x):
             path_calibration=cfg.get("calib"),
             path_imu=cfg.get("imu"),
             path_laz_LF_ENU=None,
+            export="",
             **run_params
         )
 
@@ -178,8 +179,6 @@ def objective(x):
         ws.cell(row=row_idx, column=std_avg_col + 1, value=std_avg)
         ws.cell(row=row_idx, column=env_avg_col + 1, value=env_avg)
         score = score_from_avgs(std_avg, env_avg)
-        if score < best_score:
-            best_score = score
     else:
         score = 1e9  # penalty if nothing ran
 

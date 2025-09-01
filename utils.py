@@ -8,6 +8,7 @@ import scipy
 from scipy.ndimage import maximum_filter1d, minimum_filter1d, uniform_filter1d
 
 import rotations
+from pyqgis_tools import point_cloud
 
 
 def load_parquet_data(path_folder, path_calibration=None, path_imu=None):
@@ -154,6 +155,7 @@ def path_to_decimal_year(path):
     days_elapsed = (date - year_start).total_seconds() / (24 * 3600)
     decimal_year = year + (days_elapsed / days_in_year)
     return decimal_year
+
 
 def get_enveloppe(ts, mag_signal_1d, sliding_time=2):
     freq = 1 / numpy.median(numpy.diff(ts, ))
@@ -407,7 +409,16 @@ def ahrs(
         beta=betas,
     )
     quaternions = rotations.low_pass_quaternions(quaternions, ts, duration_filter_quaternions_outputs)
-    return ts, quaternions, mx_interp, my_interp, mz_interp, ax_interp, ay_interp, az_interp, mag_vect_raw
+    return (
+        ts, quaternions,
+        mx_interp, my_interp, mz_interp,
+        ax_interp, ay_interp, az_interp,
+        mag_vect_raw,
+        mxlf_interp, mylf_interp, mzlf_interp,
+        mxla_interp, myla_interp, mzla_interp,
+        mxra_interp, myra_interp, mzra_interp,
+        mxrf_interp, myrf_interp, mzrf_interp,
+    )
 
 
 def adaptative_gains(
@@ -529,4 +540,26 @@ def ahrs_madgwick_rust(ts, mag, gyr, acc, mag_vect, gain_acc, gain_mag, beta):
     quaternions = rotations.rot_mat_to_quaternions(rot_mat)
     return quaternions
 
+
+def export_to_laz(path, yaw, pitch, roll, mx_enu, my_enu, mz_enu, ts, positions, ax_ned, ay_ned, az_ned):
+    X = numpy.array([position[0][0] for position in positions]).flatten()
+    Y = numpy.array([position[0][1] for position in positions]).flatten()
+    Z = numpy.array([position[0][2] for position in positions]).flatten()
+
+    values = {
+        "X": X,
+        "Y": Y,
+        "Z": Z,
+        "yaw": yaw,
+        "pitch": pitch,
+        "roll": roll,
+        "Mx_ENU": mx_enu,
+        "My_ENU": my_enu,
+        "Mz_ENU": mz_enu,
+        "Ax_NED": ax_ned,
+        "Ay_NED": ay_ned,
+        "Az_NED": az_ned,
+        "Timestamp": ts
+    }
+    return point_cloud.create_point_cloud(path, values)
 
