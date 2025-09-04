@@ -5,6 +5,7 @@ import pandas
 import pyIGRF
 import pyproj
 import scipy
+from matplotlib import pyplot as plt
 from scipy.ndimage import maximum_filter1d, minimum_filter1d, uniform_filter1d
 
 import rotations
@@ -12,7 +13,7 @@ from pyqgis_tools import point_cloud
 
 
 def load_parquet_data(path_folder, path_calibration=None, path_imu=None):
-    ts_gnss, gnss_x, gnss_y, gnss_z, gnss_lon, gnss_lat = load_parquet_gnss(path_folder)
+    ts_gnss, gnss_x, gnss_y, gnss_z, gnss_lon, gnss_lat, epsg = load_parquet_gnss(path_folder)
     ts_imu, ax, ay, az, vrx, vry, vrz = load_parquet_imu(path_folder, path_imu)
     ts_mag, mxlf, mylf, mzlf, mxla, myla, mzla, mxra, myra, mzra, mxrf, myrf, mzrf = load_parquet_mag(
         os.path.join(path_folder, "left_forearm.parquet"),
@@ -20,10 +21,10 @@ def load_parquet_data(path_folder, path_calibration=None, path_imu=None):
         os.path.join(path_folder, "right_arm.parquet"),
         os.path.join(path_folder, "right_forearm.parquet"),
     )
-    # if False:
+
     if path_calibration is not None:
         (
-            ts_gnss_calib, gnss_x_calib, gnss_y_calib, gnss_z_calib, gnss_lon_calib, gnss_lat_calib,
+            ts_gnss_calib, gnss_x_calib, gnss_y_calib, gnss_z_calib, gnss_lon_calib, gnss_lat_calib, epsg,
             ts_imu_calib, ax_calib, ay_calib, az_calib, vrx_calib, vry_calib, vrz_calib,
             ts_mag_calib, mxlf_calib, mylf_calib, mzlf_calib, mxla_calib, myla_calib, mzla_calib, mxra_calib,
             myra_calib, mzra_calib, mxrf_calib, myrf_calib, mzrf_calib
@@ -53,7 +54,7 @@ def load_parquet_data(path_folder, path_calibration=None, path_imu=None):
         mxrf, myrf, mzrf = apply_calibration(rf_calib, mxrf, myrf, mzrf)
 
     return (
-        ts_gnss, gnss_x, gnss_y, gnss_z, gnss_lon, gnss_lat,
+        ts_gnss, gnss_x, gnss_y, gnss_z, gnss_lon, gnss_lat, epsg,
         ts_imu, ax, ay, az, vrx, vry, vrz,
         ts_mag, mxlf, mylf, mzlf, mxla, myla, mzla, mxra, myra, mzra, mxrf, myrf, mzrf
     )
@@ -68,7 +69,7 @@ def load_parquet_gnss(path_gnss):
     transformer = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:32631", always_xy=True)
     # TODO: Mettre un EPSG dynamique UTM
     x, y = transformer.transform(lon, lat)
-    return gnss_ts, x, y, alt, lon, lat
+    return gnss_ts, x, y, alt, lon, lat, 32631
 
 
 def load_parquet_imu(path_imu, path_calib_imu=None):
@@ -237,11 +238,31 @@ def interpolate_imu_on_mag(
 
 
 def merge_mag(mxlf, mylf, mzlf, mxla, myla, mzla, mxra, myra, mzra, mxrf, myrf, mzrf):
-    # mx = numpy.mean([mxlf, mxla, mxra, mxrf], axis=0)
-    # my = numpy.mean([mylf, myla, myra, myrf], axis=0)
-    # mz = numpy.mean([mzlf, mzla, mzra, mzrf], axis=0)
-    # return mx, my, mz
-    return mxlf, mylf, mzlf
+
+    # fig, axs = plt.subplots(3)
+    # axs[0].plot(mxlf, label="mxlf")
+    # axs[1].plot(mylf, label="mylf")
+    # axs[2].plot(mzlf, label="mzlf")
+    # axs[0].plot(mxla, label="mxla")
+    # axs[1].plot(myla, label="myla")
+    # axs[2].plot(mzla, label="mzla")
+    # axs[0].plot(mxra, label="mxra")
+    # axs[1].plot(myra, label="myra")
+    # axs[2].plot(mzra, label="mzra")
+    # axs[0].plot(mxrf, label="mxrf")
+    # axs[1].plot(myrf, label="myrf")
+    # axs[2].plot(mzrf, label="mzrf")
+    #
+    # axs[0].legend()
+    # axs[1].legend()
+    # axs[2].legend()
+    # plt.show()
+
+    mx = numpy.mean([mxlf, mxla, mxra, mxrf], axis=0)
+    my = numpy.mean([mylf, myla, myra, myrf], axis=0)
+    mz = numpy.mean([mzlf, mzla, mzra, mzrf], axis=0)
+    return mx, my, mz
+    # return mxlf, mylf, mzlf
 
 
 def madgwick(
@@ -249,6 +270,7 @@ def madgwick(
     gain_acc, gain_mag, beta,
     earth_vector, q0=None,
     forward=True,
+    normalize_madgwick_step=True,
 ):
     n = len(timestamps)
 
@@ -272,7 +294,7 @@ def madgwick(
         quaternions[i] = rotations.madgwick_step(
             prev_q(i), get_dt(i), coef(i),
             mag[i], gyr[i], acc[i],
-            gain_acc[i], gain_mag[i], step, earth_vector, beta[i])
+            gain_acc[i], gain_mag[i], step, earth_vector, beta[i], normalize_madgwick_step)
     return quaternions
 
 
@@ -343,7 +365,7 @@ def ahrs(
     ts_mag, mxlf, mylf, mzlf, mxla, myla, mzla, mxra, myra, mzra, mxrf, myrf, mzrf,
     duration_filter_mag_axis, duration_filter_mag_merged, duration_filter_gyr, n_filter_acc,
     duration_filter_quaternions_outputs, gain_acc, gain_mag, path_folder, ts_mag_to_imu, ahrs_func,
-    adaptative_beta, adaptative_gain_acc, adaptative_gain_mag, beta
+    adaptative_beta, adaptative_gain_acc, adaptative_gain_mag, beta, normalize_madgwick_step
 ):
     if ts_mag_to_imu:
         (
@@ -407,6 +429,7 @@ def ahrs(
         gain_acc=gains_acc,
         gain_mag=gains_mag,
         beta=betas,
+        normalize_madgwick_step=normalize_madgwick_step,
     )
     quaternions = rotations.low_pass_quaternions(quaternions, ts, duration_filter_quaternions_outputs)
     return (
@@ -463,7 +486,7 @@ def low_pass(data, ts=None, n=None, t=None):
     return uniform_filter1d(data, size=n, axis=0, mode="reflect")
 
 
-def ahrs_madgwick_python_benet(ts, mag, gyr, acc, mag_vect, gain_acc, gain_mag, beta):
+def ahrs_madgwick_python_benet(ts, mag, gyr, acc, mag_vect, gain_acc, gain_mag, beta, normalize_madgwick_step):
     n_sample = int(60 / numpy.median(numpy.diff(ts)))
     q0_backward = madgwick(
         timestamps=ts[-n_sample:],
@@ -475,6 +498,7 @@ def ahrs_madgwick_python_benet(ts, mag, gyr, acc, mag_vect, gain_acc, gain_mag, 
         gain_acc=gain_acc,
         gain_mag=gain_mag,
         beta=beta,
+        normalize_madgwick_step=normalize_madgwick_step,
         forward=True)[-1]
     q0_forward = madgwick(
         timestamps=ts, acc=acc, gyr=gyr, mag=mag, earth_vector=mag_vect,
@@ -482,6 +506,7 @@ def ahrs_madgwick_python_benet(ts, mag, gyr, acc, mag_vect, gain_acc, gain_mag, 
         gain_acc=gain_acc,
         gain_mag=gain_mag,
         beta=beta,
+        normalize_madgwick_step=normalize_madgwick_step,
         forward=False)[0]
     return madgwick(
         timestamps=ts, acc=acc, gyr=gyr, mag=mag, earth_vector=mag_vect,
@@ -489,10 +514,11 @@ def ahrs_madgwick_python_benet(ts, mag, gyr, acc, mag_vect, gain_acc, gain_mag, 
         gain_acc=gain_acc,
         gain_mag=gain_mag,
         beta=beta,
+        normalize_madgwick_step=normalize_madgwick_step,
         forward=True)
 
 
-def ahrs_madgwick_rust(ts, mag, gyr, acc, mag_vect, gain_acc, gain_mag, beta):
+def ahrs_madgwick_rust(ts, mag, gyr, acc, mag_vect, gain_acc, gain_mag, beta, normalize_madgwick_step):
     import skipper_madgwick_filter_rs
     config = skipper_madgwick_filter_rs.ConfigRs(
         start=skipper_madgwick_filter_rs.StartingRs(
@@ -541,25 +567,37 @@ def ahrs_madgwick_rust(ts, mag, gyr, acc, mag_vect, gain_acc, gain_mag, beta):
     return quaternions
 
 
-def export_to_laz(path, yaw, pitch, roll, mx_enu, my_enu, mz_enu, ts, positions, ax_ned, ay_ned, az_ned):
+def export_to_laz(
+        path,
+        mxlf_ned, mylf_ned, mzlf_ned,
+        mxla_ned, myla_ned, mzla_ned,
+        mxra_ned, myra_ned, mzra_ned,
+        mxrf_ned, myrf_ned, mzrf_ned,
+        positions, epsg):
+
+    # plt.scatter(positions[0][0][0], positions[0][0][1], c=mzlf_ned, cmap='rainbow_r')
+    # plt.show()
+
     X = numpy.array([position[0][0] for position in positions]).flatten()
     Y = numpy.array([position[0][1] for position in positions]).flatten()
     Z = numpy.array([position[0][2] for position in positions]).flatten()
+
+    mx = numpy.array([mxlf_ned, mxla_ned, mxra_ned, mxrf_ned]).flatten()
+    my = numpy.array([mylf_ned, myla_ned, myra_ned, myrf_ned]).flatten()
+    mz = numpy.array([mzlf_ned, mzla_ned, mzra_ned, mzrf_ned]).flatten()
+    mn = numpy.linalg.norm([mx, my, mz], axis=0)
+
+    # plt.scatter(X, Y, c=mz, cmap='rainbow_r')
+    # plt.show()
 
     values = {
         "X": X,
         "Y": Y,
         "Z": Z,
-        "yaw": yaw,
-        "pitch": pitch,
-        "roll": roll,
-        "Mx_ENU": mx_enu,
-        "My_ENU": my_enu,
-        "Mz_ENU": mz_enu,
-        "Ax_NED": ax_ned,
-        "Ay_NED": ay_ned,
-        "Az_NED": az_ned,
-        "Timestamp": ts
+        "Mx": mx,
+        "My": my,
+        "Mz": mz,
+        "Mn": mn,
     }
-    return point_cloud.create_point_cloud(path, values)
+    return point_cloud.create_point_cloud(path, values, epsg)
 

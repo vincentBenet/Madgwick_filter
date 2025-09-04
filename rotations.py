@@ -31,7 +31,34 @@ def rotate_mag_old(mx, my, mz, quaternions):  # Rotate quaternions in ENU conven
     return mx_rot, my_rot, mz_rot
 
 
+def avg_quaternion_from_mag(mx_ref, my_ref, mz_ref, mx, my, mz):
+    ref = np.vstack([mx_ref, my_ref, mz_ref]).T
+    meas = np.vstack([mx, my, mz]).T
+
+    # Normalize
+    ref /= np.linalg.norm(ref, axis=1)[:, None]
+    meas /= np.linalg.norm(meas, axis=1)[:, None]
+
+    # Correlation matrix
+    M = meas.T @ ref
+
+    # SVD
+    U, _, Vt = np.linalg.svd(M)
+    R_opt = U @ Vt
+
+    # Ensure right-handed rotation
+    if np.linalg.det(R_opt) < 0:
+        U[:, -1] *= -1
+        R_opt = U @ Vt
+
+    # Convert to quaternion (x, y, z, w format in scipy)
+    quat = Rotation.from_matrix(R_opt).as_quat()
+    return numpy.array([quat[3], quat[0], quat[1], quat[2]])
+
+
 def rotate_data(mx, my, mz, quaternions, ned=True):
+    if len(numpy.shape(quaternions)) == 1:
+        quaternions = np.tile(quaternions, (len(mx), 1))
     mags_rot = Rotation.from_quat(quaternions[:, [1, 2, 3, 0]]).apply(np.stack((mx, my, mz), axis=-1))
     if ned:
         return mags_rot[:, 0], mags_rot[:, 1], mags_rot[:, 2]  # NED
@@ -183,9 +210,10 @@ def rot_mat_to_quaternions(rot_mat):
 
 
 def mag_position(ts_gnss, gnss_x, gnss_y, gnss_z, ts, quaternions, positions=np.array([-0.80353, -0.27744, 0.27744, 0.80353])):
-    x = scipy.interpolate.Akima1DInterpolator(ts_gnss, gnss_x)(ts)
-    y = scipy.interpolate.Akima1DInterpolator(ts_gnss, gnss_y)(ts)
-    z = scipy.interpolate.Akima1DInterpolator(ts_gnss, gnss_z)(ts)
+    mask_gnss = (ts_gnss <= numpy.max(ts)) & (ts_gnss >= numpy.min(ts))
+    x = scipy.interpolate.Akima1DInterpolator(ts_gnss[mask_gnss], gnss_x[mask_gnss])(ts)
+    y = scipy.interpolate.Akima1DInterpolator(ts_gnss[mask_gnss], gnss_y[mask_gnss])(ts)
+    z = scipy.interpolate.Akima1DInterpolator(ts_gnss[mask_gnss], gnss_z[mask_gnss])(ts)
     mask = ~np.isnan(numpy.array([x, y, z])).any(axis=0)
     x = x[mask]
     y = y[mask]
@@ -203,10 +231,10 @@ def mag_position(ts_gnss, gnss_x, gnss_y, gnss_z, ts, quaternions, positions=np.
             y + offsets_y,
             z + offsets_z])
 
-    return ts_filtered, sensors_positions
+    return ts_filtered, sensors_positions, mask
 
 
-def madgwick_step(quaternion, dt, coef, mag, gyr, acc, gain_acc, gain_mag, step, earth_vector, beta):
+def madgwick_step(quaternion, dt, coef, mag, gyr, acc, gain_acc, gain_mag, step, earth_vector, beta, normalize_madgwick_step):
     step_acc = quaternion_gradiant(quaternion, acc, np.array([0, 0, 1]))  # Normalisé
     step_mag = quaternion_gradiant(quaternion, mag, earth_vector)  # Normalisé
     step_gyr = product_quaternion(quaternion, step * gyr)  # Non-Normalisé
@@ -214,7 +242,10 @@ def madgwick_step(quaternion, dt, coef, mag, gyr, acc, gain_acc, gain_mag, step,
             gain_acc * step_acc +
             gain_mag * step_mag
     ) * coef)  # Non-Normalisé
-    return normalize_quaternion(quaternion + dt * step_total)  # Normalisé
+    res = quaternion + dt * step_total
+    if normalize_madgwick_step:
+        res = normalize_quaternion(res)
+    return res
 
 
 def low_pass_quaternions(quaternions, ts, duration):

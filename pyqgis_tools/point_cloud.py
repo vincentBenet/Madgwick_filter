@@ -1,7 +1,8 @@
 import os
 
 import numpy
-from qgis._core import QgsDoubleRange, QgsGeometry, QgsProviderRegistry, QgsVectorFileWriter, QgsPoint
+from pyproj import CRS
+from qgis._core import QgsDoubleRange, QgsGeometry, QgsProviderRegistry
 from qgis.core import QgsPointCloudLayer
 
 try:  # From QGIS
@@ -105,52 +106,39 @@ def get_attributes(path=None, layer=None, provider=None):
     return [key for key in load_points(path=path, layer=layer, provider=provider, n=1)]
 
 
-def create_point_cloud(path, values):
-    assert "X" in values
-    assert "Y" in values
-    assert "Z" in values
+def create_point_cloud(path, values, epsg):
+    try:
+        import laspy
+    except ImportError:
+        import pip
+        pip.main(["install", "laspy[laszip]"])
+        try:
+            import laspy
+        except ImportError:
+            return
 
-    from qgis.core import (
-        QgsVectorLayer,
-        QgsField,
-        QgsFeature,
-        QgsGeometry
-    )
-    from PyQt5.QtCore import QVariant
+    assert path.endswith(".laz"), "Output must be .laz"
 
-    # In-memory PointZ vector layer
-    vl = QgsVectorLayer("PointZ?crs=EPSG:4326", "pointcloud_points", "memory")
-    pr = vl.dataProvider()
+    # LAS header: use format 3 (common, supports GPS time, color, etc.)
+    header = laspy.LasHeader(point_format=3, version="1.2")
+    crs = CRS.from_epsg(epsg)
+    header.parse_crs(crs)
+    las = laspy.LasData(header)
 
-    # Add attributes
-    pr.addAttributes([
-        QgsField(attr, QVariant.Double) for attr in values.keys()
-        if attr not in ("X", "Y", "Z")
-    ])
-    vl.updateFields()
+    # Standard XYZ coordinates
+    las.x = values["X"]
+    las.y = values["Y"]
+    las.z = values["Z"]
 
-    feats = []
-    for i in range(len(values["X"])):
-        f = QgsFeature()
-        pt = QgsPoint(values["X"][i], values["Y"][i], values["Z"][i])
-        f.setGeometry(QgsGeometry.fromPoint(pt))
-        attrs = [float(values[attr][i]) for attr in values if attr not in ("X", "Y", "Z")]
-        f.setAttributes(attrs)
-        feats.append(f)
+    for attr, data in values.items():
+        if attr in ("X", "Y", "Z"):
+            continue
+        las.add_extra_dim(laspy.ExtraBytesParams(
+            name=attr,
+            type=data.dtype
+        ))
+        las[attr] = data
 
-    pr.addFeatures(feats)
-    vl.updateExtents()
-
-    # Save as GPKG or Shapefile
-    writer = QgsVectorFileWriter.writeAsVectorFormat(
-        vl,
-        path,
-        "utf-8",
-        vl.crs(),
-        "GPKG" if path.endswith(".gpkg") else "ESRI Shapefile"
-    )
-
-    if writer[0] != QgsVectorFileWriter.NoError:
-        raise Exception(f"Error saving point cloud to {path}: {writer}")
-
-    return vl
+    # Save compressed LAZ
+    las.write(path)
+    print(f"Exported {len(values['X'])} points to {path}")

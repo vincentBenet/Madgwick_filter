@@ -151,6 +151,8 @@ def objective(x):
         print(f"Running {cfg_name}...")
         results = check_ahrs.main(
             plot=False,
+            mag_aligment=True,
+            normalize_madgwick_step=True,
             path_folder=os.path.dirname(os.path.dirname(cfg["laz"])),
             path_calibration=cfg.get("calib"),
             path_imu=cfg.get("imu"),

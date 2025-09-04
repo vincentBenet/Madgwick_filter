@@ -20,7 +20,9 @@ param_names = [
     "beta",
     "adaptative_beta",
     "adaptative_acc",
-    "adaptative_mag"
+    "adaptative_mag",
+    "mag_aligment",
+    "normalize_madgwick_step",
 ]
 
 # Nouvelles métriques par acquisition
@@ -75,12 +77,15 @@ for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2
 all_combos = list(itertools.product([0, 1], repeat=len(param_names)))
 pbar = tqdm(total=len(all_combos), desc="Calculs", unit="combos")
 
+n_max = 3
+
 for combo in all_combos:
     print(f"{combo = }")
+    print(f"{sum(combo) = }")
     if (
-        (sum(combo) < len(combo) - 2) or
-        (not (combo[0]) and (combo[7] or combo[8] or combo[9] or combo[10])) or
-        (not (combo[1]))
+        (len(combo) - sum(combo) > n_max) and (sum(combo) > n_max) or
+        (not (combo[0]) and (combo[7] or combo[8] or combo[9] or combo[10]))
+        # (not (combo[1]))
     ):
         print(f"Skipping {combo}")
         continue
@@ -108,7 +113,9 @@ for combo in all_combos:
         "beta": check_ahrs.params["beta"] if combo[7] else 1,
         "adaptative_beta": check_ahrs.params["adaptative_beta"] if combo[8] else 0,
         "adaptative_gain_acc": check_ahrs.params["adaptative_gain_acc"] if combo[9] else 0,
-        "adaptative_gain_mag": check_ahrs.params["adaptative_gain_mag"] if combo[10] else 0
+        "adaptative_gain_mag": check_ahrs.params["adaptative_gain_mag"] if combo[10] else 0,
+        "mag_aligment": bool(combo[11]),
+        "normalize_madgwick_step": bool(combo[12]),
     }
 
     std_sum, env_sum, count = 0, 0, 0
